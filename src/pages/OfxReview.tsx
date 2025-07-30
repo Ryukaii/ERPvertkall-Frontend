@@ -12,7 +12,7 @@ import {
   Plus,
   X,
   ArrowRightLeft,
-  Edit,
+
   Trash2
 } from 'lucide-react';
 import apiService from '../services/api';
@@ -50,10 +50,10 @@ const OfxReview: React.FC = () => {
   const [currentTransactionId, setCurrentTransactionId] = useState<string>('');
   const [showCreateTagModal, setShowCreateTagModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
-  const [showEditTransferModal, setShowEditTransferModal] = useState(false);
+
   const [showDeleteTransferModal, setShowDeleteTransferModal] = useState(false);
   const [selectedTransactionForTransfer, setSelectedTransactionForTransfer] = useState<OfxPendingTransaction | null>(null);
-  const [selectedTransferForEdit, setSelectedTransferForEdit] = useState<OfxPendingTransaction | null>(null);
+
   const [selectedTransferForDelete, setSelectedTransferForDelete] = useState<OfxPendingTransaction | null>(null);
   const [createTagForm, setCreateTagForm] = useState({
     name: '',
@@ -334,24 +334,7 @@ const OfxReview: React.FC = () => {
     setShowTransferModal(true);
   };
 
-  const handleEditTransfer = (transaction: OfxPendingTransaction) => {
-    setSelectedTransferForEdit(transaction);
-    setShowEditTransferModal(true);
-  };
 
-  const handleUpdateTransfer = (data: any) => {
-    if (selectedTransferForEdit) {
-      // Implementar atualização de transferência
-      console.log('Atualizando transferência:', data);
-      setShowEditTransferModal(false);
-      setSelectedTransferForEdit(null);
-    }
-  };
-
-  const handleDeleteTransfer = (transaction: OfxPendingTransaction) => {
-    setSelectedTransferForDelete(transaction);
-    setShowDeleteTransferModal(true);
-  };
 
   const handleConfirmDeleteTransfer = () => {
     if (selectedTransferForDelete) {
@@ -937,113 +920,7 @@ const OfxReview: React.FC = () => {
           </div>
         )}
 
-        {/* Modal de Edição de Transferência */}
-        {showEditTransferModal && selectedTransferForEdit && (
-          <div className="fixed inset-0 z-50 overflow-y-auto">
-            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-              <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowEditTransferModal(false)}></div>
-              
-              <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-medium text-gray-900">Editar Transferência</h3>
-                    <button
-                      onClick={() => setShowEditTransferModal(false)}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Transferência:
-                      </label>
-                      <div className="bg-gray-100 p-3 rounded-md text-sm text-gray-900">
-                        {selectedTransferForEdit.title}
-                        <br />
-                        {selectedTransferForEdit.description}
-                        <br />
-                        {formatCurrency(selectedTransferForEdit.amount)}
-                        <br />
-                        {formatDate(selectedTransferForEdit.transactionDate)}
-                      </div>
-                    </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Título:
-                      </label>
-                      <Input
-                        value={selectedTransferForEdit.title}
-                        onChange={() => {}} // Placeholder
-                        placeholder="Título da transferência"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Descrição:
-                      </label>
-                      <textarea
-                        value={selectedTransferForEdit.description || ''}
-                        onChange={() => {}} // Placeholder
-                        placeholder="Descrição da transferência..."
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={3}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Valor:
-                      </label>
-                      <Input
-                        type="number"
-                        value={selectedTransferForEdit.amount / 100}
-                        onChange={() => {}} // Placeholder
-                        placeholder="Valor da transferência"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Data:
-                      </label>
-                      <Input
-                        type="date"
-                        value={selectedTransferForEdit.transactionDate.split('T')[0]}
-                        onChange={() => {}} // Placeholder
-                        placeholder="Data da transferência"
-                      />
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                  <Button
-                    onClick={() => {
-                      // Implementar atualização
-                      setShowEditTransferModal(false);
-                    }}
-                    className="w-full sm:w-auto sm:ml-3"
-                  >
-                    <Edit className="h-4 w-4 mr-2" />
-                    Atualizar Transferência
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowEditTransferModal(false)}
-                    className="w-full sm:w-auto mt-3 sm:mt-0"
-                  >
-                    Cancelar
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Modal de Exclusão de Transferência */}
         {showDeleteTransferModal && selectedTransferForDelete && (

@@ -54,7 +54,6 @@ import {
   MostUsedTag,
   UpdateOfxTransactionTagsRequest,
   CreateTransferRequest,
-  CreateTransferBackendRequest,
   TransferResponse
 } from '../types';
 
@@ -536,9 +535,21 @@ class ApiService {
   }
 
   // Método para criar transferências entre contas
-  createTransfer = async (data: CreateTransferBackendRequest): Promise<TransferResponse> => {
+  createTransfer = async (data: CreateTransferRequest): Promise<TransferResponse> => {
     this.ensureApiInitialized();
-    const response: AxiosResponse<TransferResponse> = await this.api.post('/bancos/transfers', data);
+    // Convert frontend request to backend request format
+    const backendData = {
+      title: data.title,
+      description: data.description,
+      amount: data.amount,
+      transferFromBankId: data.fromBankId,
+      transferToBankId: data.toBankId,
+      transactionDate: data.transactionDate,
+      categoryId: data.categoryId,
+      paymentMethodId: data.paymentMethodId,
+      tagIds: data.tagIds
+    };
+    const response: AxiosResponse<TransferResponse> = await this.api.post('/bancos/transfers', backendData);
     return response.data;
   }
 

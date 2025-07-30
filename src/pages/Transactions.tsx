@@ -22,7 +22,7 @@ import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import Modal from '../components/ui/Modal';
 import { formatCurrency, formatDate, extractDateForForm, parseBackendDate } from '../utils/format';
-import { BankTransaction, BankTransactionFilters, CreateTransferRequest, CreateTransferBackendRequest } from '../types';
+import { BankTransaction, BankTransactionFilters, CreateTransferRequest } from '../types';
 import { useForm } from 'react-hook-form';
 
 const Transactions: React.FC = () => {
@@ -32,7 +32,7 @@ const Transactions: React.FC = () => {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isConvertToTransferModalOpen, setIsConvertToTransferModalOpen] = useState(false);
   const [isEditTransferModalOpen, setIsEditTransferModalOpen] = useState(false);
-  const [isDeleteTransferModalOpen, setIsDeleteTransferModalOpen] = useState(false);
+
   const [selectedTransaction, setSelectedTransaction] = useState<BankTransaction | null>(null);
   const [selectedTransfer, setSelectedTransfer] = useState<BankTransaction | null>(null);
   const [selectedBank, setSelectedBank] = useState<string>('');
@@ -65,10 +65,7 @@ const Transactions: React.FC = () => {
   const queryClient = useQueryClient();
 
   // Queries
-  const { data: banks } = useQuery(['banks'], () => apiService.getBanks(), {
-    onSuccess: (data) => {
-    }
-  });
+  const { data: banks } = useQuery(['banks'], () => apiService.getBanks());
   
   // Buscar todas as transações para cálculo de saldo
   const { data: allTransactionsData } = useQuery(
@@ -170,7 +167,7 @@ const Transactions: React.FC = () => {
   );
 
   const transferMutation = useMutation(
-    (data: CreateTransferBackendRequest) => {
+    (data: CreateTransferRequest) => {
       return apiService.createTransfer(data);
     },
     {
@@ -1968,12 +1965,12 @@ const TransferModal: React.FC<TransferModalProps> = ({
     const reais = parseFloat(cleanValue) || 0;
     const cents = Math.round(reais * 100);
 
-    const submitData = {
+    const submitData: CreateTransferRequest = {
       title: data.title,
       description: data.description,
       amount: cents,
-      transferFromBankId: data.fromBankId,  // Mapear para o nome correto
-      transferToBankId: data.toBankId,      // Mapear para o nome correto
+      fromBankId: data.fromBankId,
+      toBankId: data.toBankId,
       transactionDate: data.transactionDate ? new Date(data.transactionDate).toISOString() : new Date().toISOString(),
       categoryId: data.categoryId,
       paymentMethodId: data.paymentMethodId,
@@ -1981,17 +1978,17 @@ const TransferModal: React.FC<TransferModalProps> = ({
     };
 
     // Remove campos vazios EXCETO os obrigatórios
-    const requiredFields = ['title', 'transferFromBankId', 'transferToBankId', 'amount', 'transactionDate'];
+    const requiredFields = ['title', 'fromBankId', 'toBankId', 'amount', 'transactionDate'];
     Object.keys(submitData).forEach(key => {
       if (requiredFields.includes(key)) {
         return; // Não remove campos obrigatórios
       }
       
-      const value = submitData[key];
+      const value = (submitData as any)[key];
       if (value === '' || value === null || value === undefined) {
-        delete submitData[key];
+        delete (submitData as any)[key];
       } else if (typeof value === 'string' && value.trim() === '') {
-        delete submitData[key];
+        delete (submitData as any)[key];
       }
     });
 
@@ -2060,9 +2057,9 @@ const TransferModal: React.FC<TransferModalProps> = ({
           }}
           {...register('amount', { 
             required: 'Valor é obrigatório',
-            validate: (value: string) => {
+            validate: (value: any) => {
               if (!value) return 'Valor é obrigatório';
-              const cleanValue = value.replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.');
+              const cleanValue = value.toString().replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.');
               const reais = parseFloat(cleanValue) || 0;
               const cents = Math.round(reais * 100);
               if (cents <= 0) return 'Valor deve ser maior que zero';
@@ -2449,6 +2446,17 @@ const EditTransferModal: React.FC<EditTransferModalProps> = ({
   paymentMethods,
   isLoading,
 }) => {
+  // Função para formatar valor numérico para exibição
+  const formatNumericValue = (value: number): string => {
+    const reais = value / 100;
+    return reais.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
   const { register, handleSubmit, formState: { errors }, setValue } = useForm({
     defaultValues: {
       title: transfer.title,
@@ -2472,17 +2480,6 @@ const EditTransferModal: React.FC<EditTransferModalProps> = ({
       maximumFractionDigits: 2,
     });
     return formatted;
-  };
-
-  // Função para formatar valor numérico para exibição
-  const formatNumericValue = (value: number): string => {
-    const reais = value / 100;
-    return reais.toLocaleString('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
   };
 
   // Função para converter valor formatado de volta para número
