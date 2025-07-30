@@ -6,7 +6,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<{ message: string; needsApproval: boolean }>;
   logout: () => void;
   isLoading: boolean;
   isAuthenticated: boolean;
@@ -81,11 +81,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const response = await apiService.register({ name, email, password });
       
-      localStorage.setItem('token', response.access_token);
-      localStorage.setItem('user', JSON.stringify(response.user));
+      // Se o usuário não está aprovado, não fazer login automático
+      if (!response.isApproved) {
+        return {
+          message: response.message || 'Cadastro realizado com sucesso! Aguarde a aprovação de um administrador para acessar o sistema.',
+          needsApproval: true
+        };
+      }
       
-      setToken(response.access_token);
-      setUser(response.user);
+      // Se está aprovado (usuários admin por exemplo), fazer login automático
+      // Nota: Na prática, o registro pode retornar um token diretamente se aprovado
+      return {
+        message: 'Cadastro realizado e aprovado com sucesso!',
+        needsApproval: false
+      };
     } catch (error) {
       throw error;
     }

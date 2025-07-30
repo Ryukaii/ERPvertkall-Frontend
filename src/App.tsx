@@ -7,6 +7,7 @@ import Financeiro from './pages/Financeiro';
 import Ajustes from './pages/Ajustes';
 import BankTransactions from './pages/BankTransactions';
 import Users from './pages/Users';
+import PendingApprovals from './pages/PendingApprovals';
 import MyPermissions from './pages/MyPermissions';
 import AdminRoute from './components/AdminRoute';
 import Dashboard from './pages/Dashboard';
@@ -115,6 +116,16 @@ const App: React.FC = () => {
           <ProtectedRoute>
             <AdminRoute>
               <Users />
+            </AdminRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users/pending-approvals"
+        element={
+          <ProtectedRoute>
+            <AdminRoute>
+              <PendingApprovals />
             </AdminRoute>
           </ProtectedRoute>
         }

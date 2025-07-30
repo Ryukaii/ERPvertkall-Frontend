@@ -3,6 +3,7 @@ export interface User {
   name: string;
   email: string;
   isAdmin: boolean;
+  isApproved: boolean;
   createdAt: string;
   updatedAt: string;
   userModules?: UserModule[];
@@ -65,6 +66,71 @@ export interface RegisterRequest {
   name: string;
   email: string;
   password: string;
+}
+
+// Tipos para Sistema de Aprovação de Usuários
+export interface RegisterResponse {
+  id: string;
+  email: string;
+  name: string;
+  isAdmin: boolean;
+  isApproved: boolean;
+  createdAt: string;
+  message?: string;
+}
+
+export interface ApproveUserRequest {
+  isApproved: boolean;
+}
+
+export interface PendingApprovalUser {
+  id: string;
+  name: string;
+  email: string;
+  isAdmin: boolean;
+  isApproved: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserFilters {
+  isApproved?: boolean;
+  isAdmin?: boolean;
+  search?: string;
+}
+
+// Tipos para API de Permissões Disponíveis
+export interface AvailablePermissionModule {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+}
+
+export interface AvailablePermissionResource {
+  resource: string;
+  actions: string[];
+}
+
+export interface AvailablePermissionData {
+  module: AvailablePermissionModule;
+  resources: AvailablePermissionResource[];
+}
+
+export interface PermissionOption {
+  value: string;
+  label: string;
+  module: string;
+  resource: string;
+  action: string;
+  moduleDisplayName: string;
+}
+
+export interface GroupedPermissions {
+  [moduleId: string]: {
+    module: AvailablePermissionModule;
+    permissions: PermissionOption[];
+  };
 }
 
 export interface FinancialTransaction {

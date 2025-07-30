@@ -2,7 +2,12 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { 
   AuthResponse, 
   LoginRequest, 
-  RegisterRequest, 
+  RegisterRequest,
+  RegisterResponse,
+  ApproveUserRequest,
+  PendingApprovalUser,
+  UserFilters,
+  AvailablePermissionData,
   User,
   UserPermission,
   UpdateUserPermissionsRequest,
@@ -137,9 +142,9 @@ class ApiService {
     return response.data;
   }
 
-  register = async (data: RegisterRequest): Promise<AuthResponse> => {
+  register = async (data: RegisterRequest): Promise<RegisterResponse> => {
     this.ensureApiInitialized();
-    const response: AxiosResponse<AuthResponse> = await this.api.post('/auth/register', data);
+    const response: AxiosResponse<RegisterResponse> = await this.api.post('/auth/register', data);
     return response.data;
   }
 
@@ -358,9 +363,15 @@ class ApiService {
   }
 
   // Administração de Usuários
-  getUsers = async (): Promise<User[]> => {
+  getUsers = async (filters?: UserFilters): Promise<User[]> => {
     this.ensureApiInitialized();
-    const response: AxiosResponse<User[]> = await this.api.get('/users');
+    const params = new URLSearchParams();
+    
+    if (filters?.isApproved !== undefined) params.append('isApproved', filters.isApproved.toString());
+    if (filters?.isAdmin !== undefined) params.append('isAdmin', filters.isAdmin.toString());
+    if (filters?.search) params.append('search', filters.search);
+    
+    const response: AxiosResponse<User[]> = await this.api.get(`/users?${params.toString()}`);
     return response.data;
   }
 
@@ -391,6 +402,32 @@ class ApiService {
   getMyPermissions = async (): Promise<UserPermission[]> => {
     this.ensureApiInitialized();
     const response: AxiosResponse<UserPermission[]> = await this.api.get('/users/me/permissions');
+    return response.data;
+  }
+
+  // Sistema de Aprovação de Usuários
+  getPendingApprovals = async (): Promise<PendingApprovalUser[]> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<PendingApprovalUser[]> = await this.api.get('/users/pending-approvals');
+    return response.data;
+  }
+
+  approveUser = async (userId: string, data: ApproveUserRequest): Promise<User> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<User> = await this.api.put(`/users/${userId}/approve`, data);
+    return response.data;
+  }
+
+  rejectUser = async (userId: string): Promise<User> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<User> = await this.api.put(`/users/${userId}/approve`, { isApproved: false });
+    return response.data;
+  }
+
+  // API de Permissões Disponíveis
+  getAvailablePermissions = async (): Promise<AvailablePermissionData[]> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<AvailablePermissionData[]> = await this.api.get('/users/permissions/available');
     return response.data;
   }
 

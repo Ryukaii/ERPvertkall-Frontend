@@ -8,6 +8,7 @@ import {
   User,
   Users,
   Shield,
+  Clock,
   LayoutDashboard,
   CreditCard,
   Building2,
@@ -57,6 +58,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   // Adicionar links administrativos se o usuário for admin
   const adminNavigation = user?.isAdmin ? [
     { name: 'Usuários', href: '/users', icon: Users },
+    { name: 'Aprovações Pendentes', href: '/users/pending-approvals', icon: Clock },
   ] : [];
 
   // Adicionar link de permissões para todos os usuários

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Check } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -18,6 +18,7 @@ const Register: React.FC = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const { register: registerUser } = useAuth();
   const navigate = useNavigate();
 
@@ -33,10 +34,21 @@ const Register: React.FC = () => {
   const onSubmit = async (data: RegisterFormData) => {
     setIsLoading(true);
     setError('');
+    setSuccessMessage('');
 
     try {
-      await registerUser(data.name, data.email, data.password);
-      navigate('/dashboard');
+      const result = await registerUser(data.name, data.email, data.password);
+      
+      if (result.needsApproval) {
+        setSuccessMessage(result.message);
+        // Aguardar alguns segundos antes de redirecionar para login
+        setTimeout(() => {
+          navigate('/login');
+        }, 5000);
+      } else {
+        // Usuário aprovado automaticamente (ex: admin)
+        navigate('/dashboard');
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao criar conta');
     } finally {
@@ -63,6 +75,22 @@ const Register: React.FC = () => {
           {error && (
             <div className="bg-danger-50 border border-danger-200 rounded-md p-4">
               <p className="text-sm text-danger-600">{error}</p>
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="bg-green-50 border border-green-200 rounded-md p-4">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <Check className="h-5 w-5 text-green-400" />
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm text-green-600">{successMessage}</p>
+                  <p className="text-xs text-green-500 mt-1">
+                    Você será redirecionado para a página de login em alguns segundos...
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
@@ -144,9 +172,9 @@ const Register: React.FC = () => {
             type="submit"
             className="w-full"
             loading={isLoading}
-            disabled={isLoading}
+            disabled={isLoading || !!successMessage}
           >
-            Criar conta
+            {successMessage ? 'Conta criada com sucesso!' : 'Criar conta'}
           </Button>
 
           <div className="text-center">
