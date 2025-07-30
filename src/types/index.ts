@@ -443,8 +443,14 @@ export interface OfxPendingTransaction {
   suggestedCategoryId?: string;
   suggestedCategory?: FinancialCategory;
   confidence: number;
+  // Novos campos para método de pagamento sugerido
+  suggestedPaymentMethodId?: string;
+  suggestedPaymentMethod?: PaymentMethod;
+  paymentMethodConfidence?: number;
+  finalPaymentMethodId?: string;
   createdAt: string;
   updatedAt: string;
+  tags?: Tag[];
 }
 
 export interface OfxPendingTransactionSummary {
@@ -480,6 +486,176 @@ export interface ApproveOfxImportResponse {
   createdTransactionsCount: number;
   failedTransactionsCount: number;
   errors?: string[];
+}
+
+// Tipos para Sistema de Tags
+export interface Tag {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    financialTransactions: number;
+    ofxPendingTransactions: number;
+  };
+}
+
+export interface CreateTagRequest {
+  name: string;
+  color?: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateTagRequest {
+  name?: string;
+  color?: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export interface TagFilters {
+  name?: string;
+  isActive?: boolean;
+  page?: number;
+  limit?: number;
+}
+
+export interface MostUsedTag {
+  id: string;
+  name: string;
+  color?: string;
+  isActive: boolean;
+  totalUsages: number;
+}
+
+// Atualizar tipos existentes para incluir tags
+export interface FinancialTransaction {
+  id: string;
+  title: string;
+  description?: string;
+  amount: number | string;
+  type: 'RECEIVABLE' | 'PAYABLE';
+  status: 'PENDING' | 'PAID' | 'OVERDUE';
+  dueDate: string;
+  paidDate?: string;
+  paidAt?: string;
+  categoryId?: string;
+  paymentMethodId?: string;
+  userId?: string;
+  isRecurring: boolean;
+  originalTransactionId?: string;
+  recurrenceFrequency?: 'DAILY' | 'WEEKLY' | 'FORTNIGHTLY' | 'MONTHLY' | 'BIMONTHLY' | 'QUARTERLY' | 'SEMIANNUAL' | 'ANNUAL' | 'UNTIL_END_OF_YEAR';
+  recurrenceInterval?: number;
+  recurrenceEndDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  category?: FinancialCategory;
+  paymentMethod?: PaymentMethod;
+  originalTransaction?: FinancialTransaction;
+  recurringTransactions?: FinancialTransaction[];
+  tags?: Tag[];
+}
+
+export interface BankTransaction {
+  id: string;
+  title: string;
+  description?: string;
+  amount: number;
+  type: 'CREDIT' | 'DEBIT';
+  status: 'PENDING' | 'CONFIRMED' | 'CANCELLED';
+  transactionDate: string;
+  categoryId?: string;
+  paymentMethodId?: string;
+  bankId: string;
+  createdAt: string;
+  updatedAt: string;
+  category?: FinancialCategory;
+  paymentMethod?: PaymentMethod;
+  bank?: Bank;
+  tags?: Tag[];
+}
+
+export interface OfxPendingTransaction {
+  id: string;
+  title: string;
+  description?: string;
+  amount: number;
+  type: 'CREDIT' | 'DEBIT';
+  transactionDate: string;
+  originalId: string;
+  ofxImportId: string;
+  suggestedCategoryId?: string;
+  suggestedCategory?: FinancialCategory;
+  confidence: number;
+  // Novos campos para método de pagamento sugerido
+  suggestedPaymentMethodId?: string;
+  suggestedPaymentMethod?: PaymentMethod;
+  paymentMethodConfidence?: number;
+  finalPaymentMethodId?: string;
+  createdAt: string;
+  updatedAt: string;
+  tags?: Tag[];
+}
+
+export interface UpdateOfxTransactionTagsRequest {
+  tagIds: string[];
+}
+
+export interface CreateTransactionRequest {
+  title: string;
+  description?: string;
+  amount: number | string;
+  type: 'RECEIVABLE' | 'PAYABLE';
+  dueDate: string;
+  categoryId?: string;
+  paymentMethodId?: string;
+  isRecurring?: boolean;
+  recurringInterval?: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'SEMIANNUAL' | 'ANNUAL';
+  recurringEndDate?: string;
+  tagIds?: string[];
+}
+
+export interface UpdateTransactionRequest {
+  title?: string;
+  description?: string;
+  amount?: number | string;
+  type?: 'RECEIVABLE' | 'PAYABLE';
+  status?: 'PENDING' | 'PAID' | 'OVERDUE';
+  dueDate?: string;
+  paidDate?: string | null;
+  categoryId?: string;
+  paymentMethodId?: string;
+  isRecurring?: boolean;
+  recurringInterval?: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'SEMIANNUAL' | 'ANNUAL';
+  recurringEndDate?: string;
+  tagIds?: string[];
+}
+
+export interface CreateBankTransactionRequest {
+  title: string;
+  description?: string;
+  amount: number;
+  type: 'CREDIT' | 'DEBIT';
+  transactionDate: string;
+  categoryId?: string;
+  paymentMethodId?: string;
+  tagIds?: string[];
+}
+
+export interface UpdateBankTransactionRequest {
+  title?: string;
+  description?: string;
+  amount?: number;
+  type?: 'CREDIT' | 'DEBIT';
+  status?: 'PENDING' | 'CONFIRMED' | 'CANCELLED';
+  transactionDate?: string;
+  categoryId?: string;
+  paymentMethodId?: string;
+  tagIds?: string[];
 }
 
  

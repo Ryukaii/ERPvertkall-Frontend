@@ -17,7 +17,8 @@ import {
   Calendar,
   Settings,
   BarChart3,
-  Brain
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -28,6 +29,7 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [submenuOpen, setSubmenuOpen] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -38,8 +40,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Pagamentos Recorrentes', href: '/financeiro/recurring-payments', icon: Calendar },
     { name: 'Bancos', href: '/financeiro/banks', icon: Building2 },
     { name: 'Importação OFX', href: '/financeiro/ofx-import', icon: Upload },
-    { name: 'Categorização IA', href: '/ai-categorization', icon: Brain },
+
     { name: 'Categorias', href: '/financeiro/categories', icon: Tag },
+    { name: 'Tags', href: '/financeiro/tags', icon: Tag },
     { name: 'Métodos de Pagamento', href: '/financeiro/payment-methods', icon: Wallet },
     { name: 'Relatórios', href: '/financeiro/relatorios', icon: BarChart3 },
   ];
@@ -198,15 +201,24 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </div>
 
       {/* Desktop sidebar */}
-      <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+      <div className={`hidden lg:fixed lg:inset-y-0 lg:flex lg:flex-col transition-all duration-300 ${sidebarCollapsed ? 'lg:w-16' : 'lg:w-64'}`}>
         <div className="flex flex-col flex-grow bg-white border-r border-gray-200">
-          <div className="flex h-16 items-center px-4">
+          <div className="flex h-16 items-center px-4 justify-between">
             <div className="flex items-center">
               <div className="h-8 w-8 bg-primary-600 rounded-lg flex items-center justify-center">
                 <span className="text-white font-bold text-sm">V</span>
               </div>
-              <span className="ml-2 text-lg font-semibold text-gray-900">ERP Vertkall</span>
+              {!sidebarCollapsed && (
+                <span className="ml-2 text-lg font-semibold text-gray-900">ERP Vertkall</span>
+              )}
             </div>
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              title={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
+            >
+              {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            </button>
           </div>
           {/* Sidebar navigation - UNIFICADO */}
           <nav className="flex-1 space-y-1 px-2 py-4">
@@ -217,7 +229,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   <div
                     key={item.name}
                     className="relative group"
-                    onMouseEnter={() => setSubmenuOpen(item.name)}
+                    onMouseEnter={() => !sidebarCollapsed && setSubmenuOpen(item.name)}
                     onMouseLeave={() => setSubmenuOpen(null)}
                   >
                     {/* Botão para desktop */}
@@ -228,30 +240,36 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                           : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                       }`}
                     >
-                      <item.icon className="mr-3 h-5 w-5 text-primary-500" />
-                      {item.name}
-                      <svg className="ml-auto h-4 w-4 text-gray-400 group-hover:text-gray-500" fill="none" viewBox="0 0 20 20"><path d="M6 8l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      <item.icon className={`h-5 w-5 text-primary-500 ${sidebarCollapsed ? 'mx-auto' : 'mr-3'}`} />
+                      {!sidebarCollapsed && (
+                        <>
+                          {item.name}
+                          <svg className="ml-auto h-4 w-4 text-gray-400 group-hover:text-gray-500" fill="none" viewBox="0 0 20 20"><path d="M6 8l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        </>
+                      )}
                     </div>
                     {/* Submenu - desktop */}
-                    <div
-                      className={`absolute left-0 w-full z-20 bg-white border border-gray-200 rounded-md shadow-lg py-1 transition-all duration-150 ${submenuOpen === item.name ? 'block' : 'hidden'}`}
-                      style={{ top: '100%' }}
-                    >
-                      {item.submenu.map((sub) => {
-                        const SubIcon = sub.icon;
-                        return (
-                          <Link
-                            key={sub.name}
-                            to={sub.href}
-                            className={`flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-900 ${isActive(sub.href) ? 'font-semibold text-primary-600' : ''}`}
-                            onClick={() => setSidebarOpen(false)}
-                          >
-                            <SubIcon className="mr-2 h-4 w-4 text-primary-500" />
-                            {sub.name}
-                          </Link>
-                        );
-                      })}
-                    </div>
+                    {!sidebarCollapsed && (
+                      <div
+                        className={`absolute left-0 w-full z-20 bg-white border border-gray-200 rounded-md shadow-lg py-1 transition-all duration-150 ${submenuOpen === item.name ? 'block' : 'hidden'}`}
+                        style={{ top: '100%' }}
+                      >
+                        {item.submenu.map((sub) => {
+                          const SubIcon = sub.icon;
+                          return (
+                            <Link
+                              key={sub.name}
+                              to={sub.href}
+                              className={`flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-900 ${isActive(sub.href) ? 'font-semibold text-primary-600' : ''}`}
+                              onClick={() => setSidebarOpen(false)}
+                            >
+                              <SubIcon className="mr-2 h-4 w-4 text-primary-500" />
+                              {sub.name}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               }
@@ -267,9 +285,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                   onClick={() => setSidebarOpen(false)}
+                  title={sidebarCollapsed ? item.name : undefined}
                 >
-                  <Icon className="mr-3 h-5 w-5 text-primary-500" />
-                  {item.name}
+                  <Icon className={`h-5 w-5 text-primary-500 ${sidebarCollapsed ? 'mx-auto' : 'mr-3'}`} />
+                  {!sidebarCollapsed && item.name}
                 </Link>
               );
             })}
@@ -286,9 +305,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                   onClick={() => setSidebarOpen(false)}
+                  title={sidebarCollapsed ? item.name : undefined}
                 >
-                  <Icon className="mr-3 h-5 w-5 text-primary-500" />
-                  {item.name}
+                  <Icon className={`h-5 w-5 text-primary-500 ${sidebarCollapsed ? 'mx-auto' : 'mr-3'}`} />
+                  {!sidebarCollapsed && item.name}
                 </Link>
               );
             })}
@@ -305,9 +325,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                   onClick={() => setSidebarOpen(false)}
+                  title={sidebarCollapsed ? item.name : undefined}
                 >
-                  <Icon className="mr-3 h-5 w-5 text-primary-500" />
-                  {item.name}
+                  <Icon className={`h-5 w-5 text-primary-500 ${sidebarCollapsed ? 'mx-auto' : 'mr-3'}`} />
+                  {!sidebarCollapsed && item.name}
                 </Link>
               );
             })}
@@ -316,7 +337,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </div>
 
       {/* Main content */}
-      <div className="lg:pl-64">
+      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-64'}`}>
         {/* Top bar */}
         <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
           <button
@@ -325,6 +346,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             onClick={() => setSidebarOpen(true)}
           >
             <Menu size={24} />
+          </button>
+          
+          <button
+            type="button"
+            className="hidden lg:flex -m-2.5 p-2.5 text-gray-700 hover:text-gray-900"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
+          >
+            {sidebarCollapsed ? <ChevronRight size={24} /> : <ChevronLeft size={24} />}
           </button>
 
           <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">

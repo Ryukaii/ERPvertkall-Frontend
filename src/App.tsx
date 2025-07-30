@@ -19,7 +19,8 @@ import OfxReview from './pages/OfxReview';
 import RecurringPayments from './pages/RecurringPayments';
 import AjustesUnidades from './pages/AjustesUnidades';
 import FinanceiroRelatorios from './pages/FinanceiroRelatorios';
-import AiCategorization from './pages/AiCategorization';
+
+import Tags from './pages/Tags';
 
 // Componente para rotas protegidas
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -82,19 +83,13 @@ const App: React.FC = () => {
         <Route path="banks" element={<Banks />} />
         <Route path="ofx-import" element={<OfxImport />} />
         <Route path="categories" element={<Categories />} />
+        <Route path="tags" element={<Tags />} />
         <Route path="payment-methods" element={<PaymentMethods />} />
         <Route path="recurring-payments" element={<RecurringPayments />} />
         <Route path="relatorios" element={<FinanceiroRelatorios />} />
       </Route>
 
-      <Route
-        path="/ai-categorization"
-        element={
-          <ProtectedRoute>
-            <AiCategorization />
-          </ProtectedRoute>
-        }
-      />
+
 
       <Route
         path="/ofx-review/:importId"

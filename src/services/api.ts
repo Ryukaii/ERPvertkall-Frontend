@@ -45,7 +45,14 @@ import {
   OfxPendingTransactionSummary,
   UpdateOfxTransactionCategoryRequest,
   BatchUpdateOfxCategoriesRequest,
-  ApproveOfxImportResponse
+  ApproveOfxImportResponse,
+  // Tipos para Sistema de Tags
+  Tag,
+  CreateTagRequest,
+  UpdateTagRequest,
+  TagFilters,
+  MostUsedTag,
+  UpdateOfxTransactionTagsRequest
 } from '../types';
 
 class ApiService {
@@ -648,8 +655,59 @@ class ApiService {
   // OFX Pendentes - Novas rotas da estratégia implementada
   getOfxPendingTransactionsByImport = async (importId: string): Promise<OfxPendingTransaction[]> => {
     this.ensureApiInitialized();
-    const response: AxiosResponse<OfxPendingTransaction[]> = await this.api.get(`/ofx-pending-transactions/import/${importId}`);
-    return response.data;
+    // Based on the logs, the summary endpoint contains the transactions
+    const response: AxiosResponse<any> = await this.api.get(`/ofx-pending-transactions/import/${importId}/summary`);
+    
+    console.log('OFX API Response:', response.data);
+    console.log('OFX Response type:', typeof response.data);
+    console.log('OFX Response is array:', Array.isArray(response.data));
+    console.log('OFX Response keys:', Object.keys(response.data || {}));
+    if (response.data && typeof response.data === 'object') {
+      console.log('OFX Response structure:', {
+        hasData: 'data' in response.data,
+        hasTransactions: 'transactions' in response.data,
+        hasSummary: 'summary' in response.data,
+        hasResults: 'results' in response.data
+      });
+    }
+    
+    // Handle different response formats
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+    
+    // If it's an object with a data property (wrapped response)
+    if (response.data && Array.isArray(response.data.data)) {
+      return response.data.data;
+    }
+    
+    // If it's an object with a transactions property
+    if (response.data && Array.isArray(response.data.transactions)) {
+      return response.data.transactions;
+    }
+    
+    // If it's an object with a results property
+    if (response.data && Array.isArray(response.data.results)) {
+      return response.data.results;
+    }
+    
+    // If it's an object with a summary property that contains transactions
+    if (response.data && response.data.summary && Array.isArray(response.data.summary.transactions)) {
+      return response.data.summary.transactions;
+    }
+    
+    // If it's an object with a summary property that contains transactions (alternative structure)
+    if (response.data && response.data.summary && Array.isArray(response.data.summary)) {
+      return response.data.summary;
+    }
+    
+    // If it's an object with transactions at the root level (from summary endpoint)
+    if (response.data && Array.isArray(response.data.transactions)) {
+      return response.data.transactions;
+    }
+    
+    console.error('Unexpected OFX response format:', response.data);
+    return [];
   }
 
   getOfxPendingTransactionsSummary = async (importId: string): Promise<OfxPendingTransactionSummary> => {
@@ -661,6 +719,12 @@ class ApiService {
   updateOfxTransactionCategory = async (id: string, data: UpdateOfxTransactionCategoryRequest): Promise<OfxPendingTransaction> => {
     this.ensureApiInitialized();
     const response: AxiosResponse<OfxPendingTransaction> = await this.api.put(`/ofx-pending-transactions/${id}/category`, data);
+    return response.data;
+  }
+
+  updateOfxTransactionPaymentMethod = async (id: string, data: { paymentMethodId: string }): Promise<OfxPendingTransaction> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<OfxPendingTransaction> = await this.api.put(`/ofx-pending-transactions/${id}/payment-method`, data);
     return response.data;
   }
 
@@ -681,6 +745,62 @@ class ApiService {
     const response: AxiosResponse<ApproveOfxImportResponse> = await this.api.post(`/ofx-pending-transactions/import/${importId}/approve`);
     return response.data;
   }
+
+  // Funções para Sistema de Tags
+  getTags = async (filters?: TagFilters): Promise<PaginatedResponse<Tag>> => {
+    this.ensureApiInitialized();
+    const params = new URLSearchParams();
+    
+    if (filters?.name) params.append('name', filters.name);
+    if (filters?.isActive !== undefined) params.append('isActive', filters.isActive.toString());
+    if (filters?.page) params.append('page', filters.page.toString());
+    if (filters?.limit) params.append('limit', filters.limit.toString());
+    
+    const response: AxiosResponse<PaginatedResponse<Tag>> = await this.api.get(`/tags?${params.toString()}`);
+    return response.data;
+  };
+
+  getTag = async (id: string): Promise<Tag> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<Tag> = await this.api.get(`/tags/${id}`);
+    return response.data;
+  };
+
+  createTag = async (data: CreateTagRequest): Promise<Tag> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<Tag> = await this.api.post('/tags', data);
+    return response.data;
+  };
+
+  updateTag = async (id: string, data: UpdateTagRequest): Promise<Tag> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<Tag> = await this.api.patch(`/tags/${id}`, data);
+    return response.data;
+  };
+
+  toggleTagActive = async (id: string): Promise<Tag> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<Tag> = await this.api.patch(`/tags/${id}/toggle-active`);
+    return response.data;
+  };
+
+  deleteTag = async (id: string): Promise<void> => {
+    this.ensureApiInitialized();
+    await this.api.delete(`/tags/${id}`);
+  };
+
+  getMostUsedTags = async (limit: number = 10): Promise<MostUsedTag[]> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<MostUsedTag[]> = await this.api.get(`/tags/most-used?limit=${limit}`);
+    return response.data;
+  };
+
+  // Funções para Tags em Transações OFX
+  updateOfxTransactionTags = async (id: string, data: UpdateOfxTransactionTagsRequest): Promise<OfxPendingTransaction> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<OfxPendingTransaction> = await this.api.patch(`/ofx-pending-transactions/${id}/tags`, data);
+    return response.data;
+  };
 
 }
 
