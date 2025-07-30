@@ -59,7 +59,8 @@ const BankTransactions: React.FC = () => {
 
   const transactionTypeLabels = {
     CREDIT: 'Crédito',
-    DEBIT: 'Débito'
+    DEBIT: 'Débito',
+    TRANSFER: 'Transferência'
   };
 
   const statusLabels = {
@@ -139,7 +140,12 @@ const BankTransactions: React.FC = () => {
       if (editingTransaction) {
         await apiService.updateBankTransaction(bankId!, editingTransaction.id, formData);
       } else {
-        await apiService.createBankTransaction(bankId!, formData);
+        // Garantir que o tipo seja válido antes de enviar
+        const transactionData = {
+          ...formData,
+          type: formData.type as 'CREDIT' | 'DEBIT' // Não permitir TRANSFER na criação manual
+        };
+        await apiService.createBankTransaction(bankId!, transactionData);
       }
       setShowModal(false);
       setEditingTransaction(null);
@@ -157,7 +163,7 @@ const BankTransactions: React.FC = () => {
       title: transaction.title,
       description: transaction.description || '',
       amount: transaction.amount,
-      type: transaction.type,
+      type: transaction.type as 'CREDIT' | 'DEBIT',
       transactionDate: extractDateForForm(transaction.transactionDate),
       categoryId: transaction.categoryId || '',
       paymentMethodId: transaction.paymentMethodId || ''

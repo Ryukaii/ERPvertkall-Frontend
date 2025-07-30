@@ -134,7 +134,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     </div>
                     {/* Submenu - mobile */}
                     <div
-                      className={`lg:hidden absolute left-0 w-full z-20 bg-white border border-gray-200 rounded-md shadow-lg py-1 transition-all duration-150 ${submenuOpen === item.name ? 'block' : 'hidden'}`}
+                      className={`lg:hidden absolute left-0 w-full z-40 bg-white border border-gray-200 rounded-md shadow-lg py-1 transition-all duration-150 ${submenuOpen === item.name ? 'block' : 'hidden'}`}
                       style={{ top: '100%' }}
                     >
                       {item.submenu.map((sub) => {
@@ -157,7 +157,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     </div>
                     {/* Submenu - desktop */}
                     <div
-                      className={`hidden lg:block absolute left-0 w-full z-20 bg-white border border-gray-200 rounded-md shadow-lg py-1 transition-all duration-150 ${submenuOpen === item.name ? 'block' : 'hidden'}`}
+                      className={`hidden lg:block absolute left-0 w-full z-40 bg-white border border-gray-200 rounded-md shadow-lg py-1 transition-all duration-150 ${submenuOpen === item.name ? 'block' : 'hidden'}`}
                       style={{ top: '100%' }}
                     >
                       {item.submenu.map((sub) => {
@@ -251,7 +251,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     {/* Submenu - desktop */}
                     {!sidebarCollapsed && (
                       <div
-                        className={`absolute left-0 w-full z-20 bg-white border border-gray-200 rounded-md shadow-lg py-1 transition-all duration-150 ${submenuOpen === item.name ? 'block' : 'hidden'}`}
+                        className={`absolute left-0 w-full z-40 bg-white border border-gray-200 rounded-md shadow-lg py-1 transition-all duration-150 ${submenuOpen === item.name ? 'block' : 'hidden'}`}
                         style={{ top: '100%' }}
                       >
                         {item.submenu.map((sub) => {
@@ -339,22 +339,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Main content */}
       <div className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-64'}`}>
         {/* Top bar */}
-        <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
+        <div className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
           <button
             type="button"
             className="-m-2.5 p-2.5 text-gray-700 lg:hidden"
             onClick={() => setSidebarOpen(true)}
           >
             <Menu size={24} />
-          </button>
-          
-          <button
-            type="button"
-            className="hidden lg:flex -m-2.5 p-2.5 text-gray-700 hover:text-gray-900"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            title={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
-          >
-            {sidebarCollapsed ? <ChevronRight size={24} /> : <ChevronLeft size={24} />}
           </button>
 
           <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">

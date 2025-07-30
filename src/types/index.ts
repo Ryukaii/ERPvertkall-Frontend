@@ -229,17 +229,26 @@ export interface BankTransaction {
   title: string;
   description?: string;
   amount: number;
-  type: 'CREDIT' | 'DEBIT';
+  type: 'CREDIT' | 'DEBIT' | 'TRANSFER';
   status: 'PENDING' | 'CONFIRMED' | 'CANCELLED';
   transactionDate: string;
   categoryId?: string;
   paymentMethodId?: string;
   bankId: string;
+  // Campos para transferências
+  transferFromBankId?: string;
+  transferToBankId?: string;
+  linkedTransactionId?: string;
   createdAt: string;
   updatedAt: string;
   category?: FinancialCategory;
   paymentMethod?: PaymentMethod;
   bank?: Bank;
+  // Relacionamentos para transferências
+  transferFromBank?: Bank;
+  transferToBank?: Bank;
+  linkedTransaction?: BankTransaction;
+  tags?: Tag[];
 }
 
 export interface CreateBankRequest {
@@ -270,6 +279,7 @@ export interface CreateBankTransactionRequest {
   transactionDate: string;
   categoryId?: string;
   paymentMethodId?: string;
+  tagIds?: string[];
 }
 
 export interface UpdateBankTransactionRequest {
@@ -560,25 +570,6 @@ export interface FinancialTransaction {
   tags?: Tag[];
 }
 
-export interface BankTransaction {
-  id: string;
-  title: string;
-  description?: string;
-  amount: number;
-  type: 'CREDIT' | 'DEBIT';
-  status: 'PENDING' | 'CONFIRMED' | 'CANCELLED';
-  transactionDate: string;
-  categoryId?: string;
-  paymentMethodId?: string;
-  bankId: string;
-  createdAt: string;
-  updatedAt: string;
-  category?: FinancialCategory;
-  paymentMethod?: PaymentMethod;
-  bank?: Bank;
-  tags?: Tag[];
-}
-
 export interface OfxPendingTransaction {
   id: string;
   title: string;
@@ -656,6 +647,45 @@ export interface UpdateBankTransactionRequest {
   categoryId?: string;
   paymentMethodId?: string;
   tagIds?: string[];
+}
+
+// Novos tipos para transferências
+export interface CreateTransferRequest {
+  title: string;
+  description?: string;
+  amount: number;
+  fromBankId: string;  // Frontend usa este nome
+  toBankId: string;    // Frontend usa este nome
+  transactionDate?: string;
+  categoryId?: string;
+  paymentMethodId?: string;
+  tagIds?: string[];
+}
+
+// Tipo para envio ao backend
+export interface CreateTransferBackendRequest {
+  title: string;
+  description?: string;
+  amount: number;
+  transferFromBankId: string;  // Backend espera este nome
+  transferToBankId: string;    // Backend espera este nome
+  transactionDate?: string;
+  categoryId?: string;
+  paymentMethodId?: string;
+  tagIds?: string[];
+}
+
+export interface TransferResponse {
+  message: string;
+  transfer: {
+    id: string;
+    amount: number;
+    fromBank: Bank;
+    toBank: Bank;
+    transactionDate: string;
+    debitTransaction: BankTransaction;
+    creditTransaction: BankTransaction;
+  };
 }
 
  

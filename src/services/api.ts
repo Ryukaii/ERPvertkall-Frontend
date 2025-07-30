@@ -52,7 +52,10 @@ import {
   UpdateTagRequest,
   TagFilters,
   MostUsedTag,
-  UpdateOfxTransactionTagsRequest
+  UpdateOfxTransactionTagsRequest,
+  CreateTransferRequest,
+  CreateTransferBackendRequest,
+  TransferResponse
 } from '../types';
 
 class ApiService {
@@ -96,6 +99,12 @@ class ApiService {
         },
         (error) => {
           console.error('API Error:', error.config?.url, error.response?.status, error.response?.data);
+    console.error('Error details:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.response?.data?.message
+    });
           // Não redirecionar automaticamente para login em caso de erro 401
           // Deixar que o componente trate o erro adequadamente
           if (error.response?.status === 401) {
@@ -526,6 +535,33 @@ class ApiService {
     await this.api.delete(`/bancos/${bankId}/transactions/${transactionId}`);
   }
 
+  // Método para criar transferências entre contas
+  createTransfer = async (data: CreateTransferBackendRequest): Promise<TransferResponse> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<TransferResponse> = await this.api.post('/bancos/transfers', data);
+    return response.data;
+  }
+
+  // Método para converter transação em transferência
+  convertTransactionToTransfer = async (data: { transactionId: string; fromBankId: string; toBankId: string; description?: string }): Promise<TransferResponse> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<TransferResponse> = await this.api.post('/bancos/transactions/convert-to-transfer', data);
+    return response.data;
+  }
+
+  // Método para atualizar transferência
+  updateTransfer = async (transferId: string, data: any): Promise<TransferResponse> => {
+    this.ensureApiInitialized();
+    const response: AxiosResponse<TransferResponse> = await this.api.patch(`/bancos/transfers/${transferId}`, data);
+    return response.data;
+  }
+
+  // Método para excluir transferência
+  deleteTransfer = async (transferId: string): Promise<void> => {
+    this.ensureApiInitialized();
+    await this.api.delete(`/bancos/transfers/${transferId}`);
+  }
+
   getBankTransactionSummary = async (bankId: string, startDate?: string, endDate?: string): Promise<BankTransactionSummary> => {
     this.ensureApiInitialized();
     const params = new URLSearchParams();
@@ -634,7 +670,7 @@ class ApiService {
           title: response.data.title,
           description: response.data.description,
           amount: response.data.amount,
-          type: response.data.type,
+          type: response.data.type as 'CREDIT' | 'DEBIT',
           transactionDate: response.data.transactionDate
         },
         autoApplied: true,

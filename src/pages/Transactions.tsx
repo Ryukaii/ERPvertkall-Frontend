@@ -12,7 +12,8 @@ import {
   ChevronDown,
   ChevronsUpDown,
   CheckSquare,
-  Square
+  Square,
+  ArrowRightLeft
 } from 'lucide-react';
 import { format } from 'date-fns';
 import apiService from '../services/api';
@@ -21,18 +22,27 @@ import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import Modal from '../components/ui/Modal';
 import { formatCurrency, formatDate, extractDateForForm, parseBackendDate } from '../utils/format';
-import { BankTransaction, BankTransactionFilters } from '../types';
+import { BankTransaction, BankTransactionFilters, CreateTransferRequest, CreateTransferBackendRequest } from '../types';
 import { useForm } from 'react-hook-form';
 
 const Transactions: React.FC = () => {
   const [filters, setFilters] = useState<BankTransactionFilters>({});
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [isConvertToTransferModalOpen, setIsConvertToTransferModalOpen] = useState(false);
+  const [isEditTransferModalOpen, setIsEditTransferModalOpen] = useState(false);
+  const [isDeleteTransferModalOpen, setIsDeleteTransferModalOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<BankTransaction | null>(null);
+  const [selectedTransfer, setSelectedTransfer] = useState<BankTransaction | null>(null);
   const [selectedBank, setSelectedBank] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     transaction: BankTransaction;
+    message: string;
+  } | null>(null);
+  const [deleteTransferConfirmation, setDeleteTransferConfirmation] = useState<{
+    transfer: BankTransaction;
     message: string;
   } | null>(null);
   const [sortConfig, setSortConfig] = useState<{
@@ -55,7 +65,10 @@ const Transactions: React.FC = () => {
   const queryClient = useQueryClient();
 
   // Queries
-  const { data: banks } = useQuery(['banks'], () => apiService.getBanks());
+  const { data: banks } = useQuery(['banks'], () => apiService.getBanks(), {
+    onSuccess: (data) => {
+    }
+  });
   
   // Buscar todas as transações para cálculo de saldo
   const { data: allTransactionsData } = useQuery(
@@ -71,9 +84,6 @@ const Transactions: React.FC = () => {
     () => selectedBank === 'all' ? apiService.getAllBankTransactions(filters) : selectedBank ? apiService.getBankTransactions(selectedBank, filters) : null,
     {
       enabled: !!selectedBank,
-      onSuccess: (data) => {
-        console.log('Bank transactions data:', data);
-      },
       onError: (error) => {
         console.error('Error fetching bank transactions:', error);
       }
@@ -90,29 +100,51 @@ const Transactions: React.FC = () => {
     const allTransactions = allTransactionsData.data;
 
     return banks.map(bank => {
-      const bankTransactions = allTransactions.filter(t => t.bankId === bank.id);
+      // Para transferências, incluir transações onde o banco é origem OU destino
+      // Evitar duplicatas: se é TRANSFER, usar apenas os campos específicos de transferência
+      const bankTransactions = allTransactions.filter(t => {
+        if (t.type === 'TRANSFER') {
+          // Para transferências, usar apenas transferFromBankId e transferToBankId
+          return t.transferFromBankId === bank.id || t.transferToBankId === bank.id;
+        } else {
+          // Para CREDIT e DEBIT, usar bankId normal
+          return t.bankId === bank.id;
+        }
+      });
       
-      // Debug: Log para o banco Sicoob Vertkall II
-      if (bank.name === 'Sicoob Vertkall II') {
-        console.log('Sicoob Vertkall II - Transações encontradas:', bankTransactions.length);
-      }
+
       
-      // Calcular saldo baseado nas transações
-      const transactionBalance = bankTransactions.reduce((total, transaction) => {
+      // ETAPA 1: Calcular apenas CREDIT e DEBIT (ignorar TRANSFER)
+      const creditDebitBalance = bankTransactions.reduce((total, transaction) => {
         if (transaction.type === 'CREDIT') {
           return total + Number(transaction.amount);
-        } else {
+        } else if (transaction.type === 'DEBIT') {
           return total - Number(transaction.amount);
         }
+        // Ignorar TRANSFER nesta etapa
+        return total;
       }, 0);
+
+      // ETAPA 2: Processar transferências separadamente
+      const transferBalance = allTransactions
+        .filter(t => t.type === 'TRANSFER')
+        .reduce((total, transfer) => {
+          if (transfer.transferFromBankId === bank.id) {
+            // Banco é origem: subtrair valor
+            return total - Number(transfer.amount);
+          } else if (transfer.transferToBankId === bank.id) {
+            // Banco é destino: adicionar valor
+            return total + Number(transfer.amount);
+          }
+          // Não afeta este banco
+          return total;
+        }, 0);
+
+      // TOTAL = CREDIT/DEBIT + TRANSFERÊNCIAS
+      const transactionBalance = creditDebitBalance + transferBalance;
 
       // Saldo real = saldo inicial + transações
       const realBalance = bank.balance + transactionBalance;
-
-      // Debug: Log para o banco Sicoob Vertkall II
-      if (bank.name === 'Sicoob Vertkall II') {
-        console.log('Sicoob Vertkall II - Saldo calculado:', realBalance);
-      }
 
       return {
         ...bank,
@@ -133,6 +165,60 @@ const Transactions: React.FC = () => {
       onSuccess: () => {
         queryClient.invalidateQueries(['bankTransactions', selectedBank]);
         setIsCreateModalOpen(false);
+      },
+    }
+  );
+
+  const transferMutation = useMutation(
+    (data: CreateTransferBackendRequest) => {
+      return apiService.createTransfer(data);
+    },
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(['bankTransactions']);
+        queryClient.invalidateQueries(['allBankTransactions']);
+        setIsTransferModalOpen(false);
+      },
+    }
+  );
+
+  const convertToTransferMutation = useMutation(
+    (data: { transactionId: string; fromBankId: string; toBankId: string; description?: string }) => {
+      return apiService.convertTransactionToTransfer(data);
+    },
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(['bankTransactions']);
+        queryClient.invalidateQueries(['allBankTransactions']);
+        setIsConvertToTransferModalOpen(false);
+        setSelectedTransaction(null);
+      },
+    }
+  );
+
+  const updateTransferMutation = useMutation(
+    (data: { transferId: string; updateData: any }) => {
+      return apiService.updateTransfer(data.transferId, data.updateData);
+    },
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(['bankTransactions']);
+        queryClient.invalidateQueries(['allBankTransactions']);
+        setIsEditTransferModalOpen(false);
+        setSelectedTransfer(null);
+      },
+    }
+  );
+
+  const deleteTransferMutation = useMutation(
+    (data: { transferId: string }) => {
+      return apiService.deleteTransfer(data.transferId);
+    },
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(['bankTransactions']);
+        queryClient.invalidateQueries(['allBankTransactions']);
+        setDeleteTransferConfirmation(null);
       },
     }
   );
@@ -309,9 +395,56 @@ const Transactions: React.FC = () => {
     createMutation.mutate(data);
   };
 
+  const handleCreateTransfer = (data: CreateTransferRequest) => {
+    transferMutation.mutate(data);
+  };
+
+  const handleConvertToTransfer = (data: { fromBankId: string; toBankId: string; description?: string }) => {
+    if (selectedTransaction) {
+      convertToTransferMutation.mutate({
+        transactionId: selectedTransaction.id,
+        ...data
+      });
+    }
+  };
+
   const handleEditTransaction = (transaction: BankTransaction) => {
     setSelectedTransaction(transaction);
     setIsEditModalOpen(true);
+  };
+
+  const handleConvertTransactionToTransfer = (transaction: BankTransaction) => {
+    setSelectedTransaction(transaction);
+    setIsConvertToTransferModalOpen(true);
+  };
+
+  const handleEditTransfer = (transfer: BankTransaction) => {
+    setSelectedTransfer(transfer);
+    setIsEditTransferModalOpen(true);
+  };
+
+  const handleUpdateTransfer = (data: any) => {
+    if (selectedTransfer) {
+      updateTransferMutation.mutate({
+        transferId: selectedTransfer.id,
+        updateData: data
+      });
+    }
+  };
+
+  const handleDeleteTransfer = (transfer: BankTransaction) => {
+    setDeleteTransferConfirmation({
+      transfer: transfer,
+      message: `Tem certeza que deseja excluir a transferência "${transfer.title}"? Esta ação também excluirá a transação vinculada.`,
+    });
+  };
+
+  const handleConfirmDeleteTransfer = () => {
+    if (deleteTransferConfirmation) {
+      deleteTransferMutation.mutate({
+        transferId: deleteTransferConfirmation.transfer.id,
+      });
+    }
   };
 
   const handleUpdateTransaction = (data: any) => {
@@ -371,6 +504,10 @@ const Transactions: React.FC = () => {
         case 'bank':
           aValue = a.bank?.name?.toLowerCase() || '';
           bValue = b.bank?.name?.toLowerCase() || '';
+          break;
+        case 'type':
+          aValue = getTransactionTypeLabel(a).toLowerCase();
+          bValue = getTransactionTypeLabel(b).toLowerCase();
           break;
         default:
           return 0;
@@ -434,6 +571,17 @@ const Transactions: React.FC = () => {
     }
   };
 
+  const getTransactionTypeLabel = (transaction: BankTransaction) => {
+    if (transaction.type === 'TRANSFER') {
+      const fromBank = transaction.transferFromBank?.name || 'Origem';
+      const toBank = transaction.transferToBank?.name || 'Destino';
+      return `Transferência: ${fromBank} → ${toBank}`;
+    }
+    return transaction.type === 'CREDIT' ? 'Crédito' : 'Débito';
+  };
+
+
+
   return (
     <>
       {/* Header */}
@@ -453,6 +601,14 @@ const Transactions: React.FC = () => {
               <span>{isSelectMode ? 'Sair da Seleção' : 'Seleção Múltipla'}</span>
             </Button>
           )}
+          <Button 
+            onClick={() => setIsTransferModalOpen(true)}
+            variant="outline"
+            className="flex items-center space-x-2"
+          >
+            <ArrowRightLeft className="h-4 w-4" />
+            Transferência
+          </Button>
           <Button 
             onClick={() => setIsCreateModalOpen(true)}
             disabled={!selectedBank || selectedBank === 'all'}
@@ -544,6 +700,7 @@ const Transactions: React.FC = () => {
                 { value: '', label: 'Todos os tipos' },
                 { value: 'CREDIT', label: 'Crédito' },
                 { value: 'DEBIT', label: 'Débito' },
+                { value: 'TRANSFER', label: 'Transferência' },
               ]}
               onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleFilterChange('type', e.target.value)}
             />
@@ -716,10 +873,18 @@ const Transactions: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-gray-600">Total de Créditos</p>
                 <p className="text-2xl font-bold text-green-600">
-                  {formatCurrency(transactions
-                    .filter(t => t.type === 'CREDIT')
-                    .reduce((sum, t) => sum + t.amount, 0)
-                  )}
+                  {formatCurrency(transactions.reduce((sum, t) => {
+                    if (t.type === 'CREDIT') {
+                      return sum + t.amount;
+                    } else if (t.type === 'TRANSFER' && selectedBank !== 'all') {
+                      // Para transferências, verificar se é entrada para o banco selecionado
+                      if (t.transferToBankId === selectedBank) {
+                        return sum + t.amount;
+                      }
+                    }
+                    // Para 'all banks', transferências são ignoradas pois se anulam
+                    return sum;
+                  }, 0))}
                 </p>
               </div>
               <div className="p-2 bg-green-100 rounded-full">
@@ -733,10 +898,18 @@ const Transactions: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-gray-600">Total de Débitos</p>
                 <p className="text-2xl font-bold text-red-600">
-                  {formatCurrency(transactions
-                    .filter(t => t.type === 'DEBIT')
-                    .reduce((sum, t) => sum + t.amount, 0)
-                  )}
+                  {formatCurrency(transactions.reduce((sum, t) => {
+                    if (t.type === 'DEBIT') {
+                      return sum + t.amount;
+                    } else if (t.type === 'TRANSFER' && selectedBank !== 'all') {
+                      // Para transferências, verificar se é saída do banco selecionado
+                      if (t.transferFromBankId === selectedBank) {
+                        return sum + t.amount;
+                      }
+                    }
+                    // Para 'all banks', transferências são ignoradas pois se anulam
+                    return sum;
+                  }, 0))}
                 </p>
               </div>
               <div className="p-2 bg-red-100 rounded-full">
@@ -750,21 +923,58 @@ const Transactions: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-gray-600">Saldo do Período</p>
                 <p className={`text-2xl font-bold ${
-                  (transactions
-                    .filter(t => t.type === 'CREDIT')
-                    .reduce((sum, t) => sum + t.amount, 0) -
-                  transactions
-                    .filter(t => t.type === 'DEBIT')
-                    .reduce((sum, t) => sum + t.amount, 0)) >= 0 
-                  ? 'text-green-600' : 'text-red-600'
+                  (() => {
+                    const totalCredits = transactions.reduce((sum, t) => {
+                      if (t.type === 'CREDIT') {
+                        return sum + t.amount;
+                      } else if (t.type === 'TRANSFER' && selectedBank !== 'all') {
+                        if (t.transferToBankId === selectedBank) {
+                          return sum + t.amount;
+                        }
+                      }
+                      return sum;
+                    }, 0);
+                    
+                    const totalDebits = transactions.reduce((sum, t) => {
+                      if (t.type === 'DEBIT') {
+                        return sum + t.amount;
+                      } else if (t.type === 'TRANSFER' && selectedBank !== 'all') {
+                        if (t.transferFromBankId === selectedBank) {
+                          return sum + t.amount;
+                        }
+                      }
+                      return sum;
+                    }, 0);
+                    
+                    return (totalCredits - totalDebits) >= 0 ? 'text-green-600' : 'text-red-600';
+                  })()
                 }`}>
                   {formatCurrency(
-                    transactions
-                      .filter(t => t.type === 'CREDIT')
-                      .reduce((sum, t) => sum + t.amount, 0) -
-                    transactions
-                      .filter(t => t.type === 'DEBIT')
-                      .reduce((sum, t) => sum + t.amount, 0)
+                    (() => {
+                      const totalCredits = transactions.reduce((sum, t) => {
+                        if (t.type === 'CREDIT') {
+                          return sum + t.amount;
+                        } else if (t.type === 'TRANSFER' && selectedBank !== 'all') {
+                          if (t.transferToBankId === selectedBank) {
+                            return sum + t.amount;
+                          }
+                        }
+                        return sum;
+                      }, 0);
+                      
+                      const totalDebits = transactions.reduce((sum, t) => {
+                        if (t.type === 'DEBIT') {
+                          return sum + t.amount;
+                        } else if (t.type === 'TRANSFER' && selectedBank !== 'all') {
+                          if (t.transferFromBankId === selectedBank) {
+                            return sum + t.amount;
+                          }
+                        }
+                        return sum;
+                      }, 0);
+                      
+                      return totalCredits - totalDebits;
+                    })()
                   )}
                 </p>
               </div>
@@ -893,6 +1103,18 @@ const Transactions: React.FC = () => {
                     </th>
                     <th 
                       className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors ${
+                        sortConfig?.key === 'type' ? 'bg-primary-50 text-primary-700' : ''
+                      }`}
+                      onClick={() => handleSort('type')}
+                      title="Clique para ordenar por Tipo"
+                    >
+                      <div className="flex items-center gap-2">
+                        Tipo
+                        {getSortIcon('type')}
+                      </div>
+                    </th>
+                    <th 
+                      className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors ${
                         sortConfig?.key === 'transactionDate' ? 'bg-primary-50 text-primary-700' : ''
                       }`}
                       onClick={() => handleSort('transactionDate')}
@@ -978,9 +1200,22 @@ const Transactions: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`text-sm font-medium ${
+                          transaction.type === 'TRANSFER' ? 'text-blue-600' :
                           transaction.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'
                         }`}>
-                          {transaction.type === 'CREDIT' ? '+' : '-'} {formatCurrency(transaction.amount)}
+                          {transaction.type === 'TRANSFER' ? 
+                            formatCurrency(transaction.amount) : 
+                            (transaction.type === 'CREDIT' ? '+' : '-') + ' ' + formatCurrency(transaction.amount)
+                          }
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          transaction.type === 'TRANSFER' ? 'bg-blue-100 text-blue-800' :
+                          transaction.type === 'CREDIT' ? 'bg-green-100 text-green-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {getTransactionTypeLabel(transaction)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -1002,17 +1237,34 @@ const Transactions: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
-                          {getAccountTypeIcon(transaction.bank?.accountType || 'CHECKING')}
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {transaction.bank?.name}
+                        {transaction.type === 'TRANSFER' ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center space-x-1 text-xs">
+                              <span className="text-gray-500">De:</span>
+                              <span className="font-medium text-gray-900">
+                                {transaction.transferFromBank?.name || 'N/A'}
+                              </span>
                             </div>
-                            <div className="text-xs text-gray-500">
-                              {transaction.bank?.accountNumber}
+                            <div className="flex items-center space-x-1 text-xs">
+                              <span className="text-gray-500">Para:</span>
+                              <span className="font-medium text-gray-900">
+                                {transaction.transferToBank?.name || 'N/A'}
+                              </span>
                             </div>
                           </div>
-                        </div>
+                        ) : (
+                          <div className="flex items-center space-x-2">
+                            {getAccountTypeIcon(transaction.bank?.accountType || 'CHECKING')}
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">
+                                {transaction.bank?.name}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {transaction.bank?.accountNumber}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex items-center justify-end space-x-2">
@@ -1043,13 +1295,42 @@ const Transactions: React.FC = () => {
                               >
                                 <Edit className="h-4 w-4" />
                               </button>
-                              <button
-                                onClick={() => handleDeleteTransaction(transaction)}
-                                className="text-red-600 hover:text-red-900"
-                                title="Excluir"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              {transaction.type !== 'TRANSFER' && (
+                                <button
+                                  onClick={() => handleConvertTransactionToTransfer(transaction)}
+                                  className="text-purple-600 hover:text-purple-900"
+                                  title="Converter para Transferência"
+                                >
+                                  <ArrowRightLeft className="h-4 w-4" />
+                                </button>
+                              )}
+                              {transaction.type === 'TRANSFER' && (
+                                <>
+                                  <button
+                                    onClick={() => handleEditTransfer(transaction)}
+                                    className="text-blue-600 hover:text-blue-900"
+                                    title="Editar Transferência"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteTransfer(transaction)}
+                                    className="text-red-600 hover:text-red-900"
+                                    title="Excluir Transferência"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </>
+                              )}
+                              {transaction.type !== 'TRANSFER' && (
+                                <button
+                                  onClick={() => handleDeleteTransaction(transaction)}
+                                  className="text-red-600 hover:text-red-900"
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
                             </>
                           )}
                           {selectedBank === 'all' && (
@@ -1319,6 +1600,126 @@ const Transactions: React.FC = () => {
           </div>
         </Modal>
       )}
+
+      {/* Transfer Modal */}
+      {isTransferModalOpen && (
+        <TransferModal
+          isOpen={isTransferModalOpen}
+          onClose={() => setIsTransferModalOpen(false)}
+          onSubmit={handleCreateTransfer}
+          banks={banks || []}
+          isLoading={transferMutation.isLoading}
+        />
+      )}
+
+      {/* Convert to Transfer Modal */}
+      {isConvertToTransferModalOpen && selectedTransaction && (
+        <ConvertToTransferModal
+          isOpen={isConvertToTransferModalOpen}
+          onClose={() => {
+            setIsConvertToTransferModalOpen(false);
+            setSelectedTransaction(null);
+          }}
+          onSubmit={handleConvertToTransfer}
+          transaction={selectedTransaction}
+          banks={banksWithRealBalance || []}
+          isLoading={convertToTransferMutation.isLoading}
+        />
+      )}
+
+      {/* Edit Transfer Modal */}
+      {isEditTransferModalOpen && selectedTransfer && (
+        <EditTransferModal
+          isOpen={isEditTransferModalOpen}
+          onClose={() => {
+            setIsEditTransferModalOpen(false);
+            setSelectedTransfer(null);
+          }}
+          onSubmit={handleUpdateTransfer}
+          transfer={selectedTransfer}
+          categories={categories || []}
+          paymentMethods={paymentMethods || []}
+          isLoading={updateTransferMutation.isLoading}
+        />
+      )}
+
+      {/* Delete Transfer Confirmation Modal */}
+      {deleteTransferConfirmation && (
+        <Modal
+          isOpen={!!deleteTransferConfirmation}
+          onClose={() => setDeleteTransferConfirmation(null)}
+          title="Confirmar Exclusão de Transferência"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                  <Trash2 className="h-5 w-5 text-red-600" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  Excluir Transferência
+                </h3>
+                <p className="text-gray-700 mb-4">
+                  {deleteTransferConfirmation.message}
+                </p>
+                
+                {/* Informações da transferência */}
+                <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Título:</span>
+                      <span className="text-sm font-medium">{deleteTransferConfirmation.transfer.title}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Valor:</span>
+                      <span className="text-sm font-medium">
+                        {formatCurrency(deleteTransferConfirmation.transfer.amount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Data:</span>
+                      <span className="text-sm font-medium">{formatDate(deleteTransferConfirmation.transfer.transactionDate)}</span>
+                    </div>
+                    {deleteTransferConfirmation.transfer.transferFromBank && deleteTransferConfirmation.transfer.transferToBank && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">Transferência:</span>
+                        <span className="text-sm font-medium">
+                          {deleteTransferConfirmation.transfer.transferFromBank.name} → {deleteTransferConfirmation.transfer.transferToBank.name}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-sm text-gray-600">
+                  Esta ação não pode ser desfeita. A transferência e a transação vinculada serão permanentemente removidas.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4">
+              <Button 
+                type="button" 
+                variant="secondary" 
+                onClick={() => setDeleteTransferConfirmation(null)}
+              >
+                Cancelar
+              </Button>
+              <Button 
+                type="button" 
+                variant="danger"
+                onClick={() => handleConfirmDeleteTransfer()}
+                loading={deleteTransferMutation.isLoading}
+              >
+                Excluir Transferência
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </>
   );
 };
@@ -1460,9 +1861,7 @@ const BankTransactionModal: React.FC<BankTransactionModalProps> = ({
             error={errors.amount?.message}
             onInput={(e) => {
               const target = e.target as HTMLInputElement;
-              console.log('onInput - valor original:', target.value);
               const formattedValue = formatCurrencyInput(target.value);
-              console.log('onInput - valor formatado:', formattedValue);
               setValue('amount', formattedValue);
             }}
             {...register('amount', { 
@@ -1526,6 +1925,190 @@ const BankTransactionModal: React.FC<BankTransactionModalProps> = ({
           </Button>
           <Button type="submit" loading={isLoading}>
             {transaction ? 'Atualizar' : 'Criar'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
+// Transfer Modal Component
+interface TransferModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: CreateTransferRequest) => void;
+  banks: any[];
+  isLoading: boolean;
+}
+
+const TransferModal: React.FC<TransferModalProps> = ({
+  isOpen,
+  onClose,
+  onSubmit,
+  banks,
+  isLoading,
+}) => {
+  const { register, handleSubmit, formState: { errors } } = useForm<CreateTransferRequest>();
+
+  const handleFormSubmit = (data: CreateTransferRequest) => {
+    
+    // Validar se os IDs dos bancos estão presentes
+    if (!data.fromBankId || data.fromBankId === '') {
+      alert('Selecione uma conta de origem');
+      return;
+    }
+    
+    if (!data.toBankId || data.toBankId === '') {
+      alert('Selecione uma conta de destino');
+      return;
+    }
+    
+    // Processar o valor formatado
+    const cleanValue = data.amount.toString().replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.');
+    const reais = parseFloat(cleanValue) || 0;
+    const cents = Math.round(reais * 100);
+
+    const submitData = {
+      title: data.title,
+      description: data.description,
+      amount: cents,
+      transferFromBankId: data.fromBankId,  // Mapear para o nome correto
+      transferToBankId: data.toBankId,      // Mapear para o nome correto
+      transactionDate: data.transactionDate ? new Date(data.transactionDate).toISOString() : new Date().toISOString(),
+      categoryId: data.categoryId,
+      paymentMethodId: data.paymentMethodId,
+      tagIds: data.tagIds
+    };
+
+    // Remove campos vazios EXCETO os obrigatórios
+    const requiredFields = ['title', 'transferFromBankId', 'transferToBankId', 'amount', 'transactionDate'];
+    Object.keys(submitData).forEach(key => {
+      if (requiredFields.includes(key)) {
+        return; // Não remove campos obrigatórios
+      }
+      
+      const value = submitData[key];
+      if (value === '' || value === null || value === undefined) {
+        delete submitData[key];
+      } else if (typeof value === 'string' && value.trim() === '') {
+        delete submitData[key];
+      }
+    });
+
+    onSubmit(submitData);
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Nova Transferência"
+      size="md"
+    >
+      <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
+        <Input
+          label="Título"
+          placeholder="Título da transferência"
+          error={errors.title?.message}
+          {...register('title', { required: 'Título é obrigatório' })}
+        />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Select
+            label="Conta de Origem"
+            options={[
+              { value: '', label: 'Selecione uma conta de origem' },
+              ...banks.filter(bank => bank.id && bank.id.trim() !== '').map(bank => ({ 
+                value: bank.id, 
+                label: `${bank.name} - ${bank.accountNumber}` 
+              })),
+            ]}
+            {...register('fromBankId', { required: 'Conta de origem é obrigatória' })}
+            error={errors.fromBankId?.message}
+          />
+          <Select
+            label="Conta de Destino"
+            options={[
+              { value: '', label: 'Selecione uma conta de destino' },
+              ...banks.filter(bank => bank.id && bank.id.trim() !== '').map(bank => ({ 
+                value: bank.id, 
+                label: `${bank.name} - ${bank.accountNumber}` 
+              })),
+            ]}
+            {...register('toBankId', { required: 'Conta de destino é obrigatória' })}
+            error={errors.toBankId?.message}
+          />
+        </div>
+
+        <Input
+          label="Valor"
+          type="text"
+          placeholder="R$ 0,00"
+          error={errors.amount?.message}
+          onInput={(e) => {
+            const target = e.target as HTMLInputElement;
+            const numbers = target.value.replace(/\D/g, '');
+            if (numbers === '') return;
+            const cents = parseInt(numbers);
+            const formatted = (cents / 100).toLocaleString('pt-BR', {
+              style: 'currency',
+              currency: 'BRL',
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+            target.value = formatted;
+          }}
+          {...register('amount', { 
+            required: 'Valor é obrigatório',
+            validate: (value: string) => {
+              if (!value) return 'Valor é obrigatório';
+              const cleanValue = value.replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.');
+              const reais = parseFloat(cleanValue) || 0;
+              const cents = Math.round(reais * 100);
+              if (cents <= 0) return 'Valor deve ser maior que zero';
+              return true;
+            }
+          })}
+          onBlur={(e) => {
+            const target = e.target as HTMLInputElement;
+            if (target.value && !target.value.includes('R$')) {
+              const numbers = target.value.replace(/\D/g, '');
+              if (numbers) {
+                const cents = parseInt(numbers);
+                const formatted = (cents / 100).toLocaleString('pt-BR', {
+                  style: 'currency',
+                  currency: 'BRL',
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                });
+                target.value = formatted;
+              }
+            }
+          }}
+        />
+
+        <Input
+          label="Data da Transferência"
+          type="date"
+          error={errors.transactionDate?.message}
+          defaultValue={new Date().toISOString().split('T')[0]}
+          {...register('transactionDate', { 
+            required: 'Data da transferência é obrigatória'
+          })}
+        />
+
+        <Input
+          label="Descrição (opcional)"
+          placeholder="Descrição da transferência"
+          {...register('description')}
+        />
+
+        <div className="flex justify-end space-x-3 pt-4">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button type="submit" loading={isLoading}>
+            Criar Transferência
           </Button>
         </div>
       </form>
@@ -1680,6 +2263,393 @@ const BulkEditForm: React.FC<BulkEditFormProps> = ({
         </div>
       </form>
     </div>
+  );
+};
+
+// Convert to Transfer Modal Component
+interface ConvertToTransferModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: { fromBankId: string; toBankId: string; description?: string }) => void;
+  transaction: BankTransaction;
+  banks: any[];
+  isLoading: boolean;
+}
+
+const ConvertToTransferModal: React.FC<ConvertToTransferModalProps> = ({
+  isOpen,
+  onClose,
+  onSubmit,
+  transaction,
+  banks,
+  isLoading,
+}) => {
+  const { register, handleSubmit, formState: { errors }, watch } = useForm({
+    defaultValues: {
+      fromBankId: transaction.bankId,
+      toBankId: '',
+      description: transaction.description || '',
+    }
+  });
+
+  const watchedFromBankId = watch('fromBankId');
+  const watchedToBankId = watch('toBankId');
+
+  // Filtrar bancos disponíveis para destino (excluir o banco de origem)
+  const availableDestinationBanks = banks.filter(bank => bank.id !== watchedFromBankId);
+
+  const handleFormSubmit = (data: any) => {
+    // Validar que os bancos são diferentes
+    if (data.fromBankId === data.toBankId) {
+      alert('A conta de origem e destino devem ser diferentes.');
+      return;
+    }
+
+    // Remove campos vazios
+    Object.keys(data).forEach(key => {
+      const value = data[key];
+      if (value === '' || value === null || value === undefined) {
+        delete data[key];
+      } else if (typeof value === 'string' && value.trim() === '') {
+        delete data[key];
+      }
+    });
+
+    onSubmit(data);
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Converter para Transferência"
+      size="lg"
+    >
+      <div className="space-y-6">
+        {/* Informações da transação original */}
+        <div className="bg-blue-50 p-4 rounded-lg">
+          <h4 className="text-sm font-medium text-blue-900 mb-2">
+            Transação Original
+          </h4>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-blue-700">Título:</span>
+              <span className="font-medium">{transaction.title}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-blue-700">Valor:</span>
+              <span className={`font-medium ${
+                transaction.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {transaction.type === 'CREDIT' ? '+' : '-'} {formatCurrency(transaction.amount)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-blue-700">Data:</span>
+              <span className="font-medium">{formatDate(transaction.transactionDate)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-blue-700">Banco Atual:</span>
+              <span className="font-medium">{transaction.bank?.name}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Formulário de conversão */}
+        <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Select
+              label="Conta de Origem"
+              options={[
+                { value: '', label: 'Selecione uma conta de origem' },
+                ...banks.map(bank => ({ value: bank.id, label: `${bank.name} - ${bank.accountNumber}` })),
+              ]}
+              {...register('fromBankId', { required: 'Conta de origem é obrigatória' })}
+              error={errors.fromBankId?.message}
+            />
+            <Select
+              label="Conta de Destino"
+              options={[
+                { value: '', label: 'Selecione uma conta de destino' },
+                ...availableDestinationBanks.map(bank => ({ value: bank.id, label: `${bank.name} - ${bank.accountNumber}` })),
+              ]}
+              {...register('toBankId', { required: 'Conta de destino é obrigatória' })}
+              error={errors.toBankId?.message}
+            />
+          </div>
+
+          <Input
+            label="Descrição da Transferência (opcional)"
+            placeholder="Descrição da transferência"
+            {...register('description')}
+          />
+
+          {/* Avisos importantes */}
+          <div className="bg-yellow-50 p-4 rounded-lg">
+            <h4 className="text-sm font-medium text-yellow-900 mb-2">
+              ⚠️ Informações Importantes
+            </h4>
+            <div className="text-sm text-yellow-800 space-y-1">
+              <div>• A transação original será convertida em uma transferência</div>
+              <div>• Serão criadas duas transações: uma de saída e uma de entrada</div>
+              <div>• O valor será mantido, mas distribuído entre as contas</div>
+              <div>• A transação original será removida do sistema</div>
+            </div>
+          </div>
+
+          {/* Resumo da operação */}
+          {watchedFromBankId && watchedToBankId && watchedFromBankId !== watchedToBankId && (
+            <div className="bg-green-50 p-4 rounded-lg">
+              <h4 className="text-sm font-medium text-green-900 mb-2">
+                Resumo da Transferência
+              </h4>
+              <div className="text-sm text-green-800 space-y-1">
+                <div>• Saída: {banks.find(b => b.id === watchedFromBankId)?.name} (-{formatCurrency(transaction.amount)})</div>
+                <div>• Entrada: {banks.find(b => b.id === watchedToBankId)?.name} (+{formatCurrency(transaction.amount)})</div>
+                <div>• Valor total: {formatCurrency(transaction.amount)}</div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button 
+              type="submit" 
+              loading={isLoading}
+              disabled={!watchedFromBankId || !watchedToBankId || watchedFromBankId === watchedToBankId}
+            >
+              Converter para Transferência
+            </Button>
+          </div>
+        </form>
+      </div>
+    </Modal>
+  );
+};
+
+// Edit Transfer Modal Component
+interface EditTransferModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: any) => void;
+  transfer: BankTransaction;
+  categories: any[];
+  paymentMethods: any[];
+  isLoading: boolean;
+}
+
+const EditTransferModal: React.FC<EditTransferModalProps> = ({
+  isOpen,
+  onClose,
+  onSubmit,
+  transfer,
+  categories,
+  paymentMethods,
+  isLoading,
+}) => {
+  const { register, handleSubmit, formState: { errors }, setValue } = useForm({
+    defaultValues: {
+      title: transfer.title,
+      description: transfer.description || '',
+      amount: transfer.amount ? formatNumericValue(transfer.amount) : '',
+      transactionDate: extractDateForForm(transfer.transactionDate),
+      categoryId: transfer.categoryId || '',
+      paymentMethodId: transfer.paymentMethodId || '',
+    }
+  });
+
+  // Função para formatar valor em moeda brasileira
+  const formatCurrencyInput = (value: string): string => {
+    const numbers = value.replace(/\D/g, '');
+    if (numbers === '') return '';
+    const cents = parseInt(numbers);
+    const formatted = (cents / 100).toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return formatted;
+  };
+
+  // Função para formatar valor numérico para exibição
+  const formatNumericValue = (value: number): string => {
+    const reais = value / 100;
+    return reais.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  // Função para converter valor formatado de volta para número
+  const parseCurrencyValue = (value: string): number => {
+    const cleanValue = value.replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.');
+    const reais = parseFloat(cleanValue) || 0;
+    return Math.round(reais * 100);
+  };
+
+  // Formatar valor quando o modal abrir
+  useEffect(() => {
+    if (isOpen && transfer?.amount) {
+      setValue('amount', formatNumericValue(transfer.amount));
+    }
+  }, [isOpen, transfer, setValue]);
+
+  const handleFormSubmit = (data: any) => {
+    // Converte o valor formatado de volta para número
+    const submitData = {
+      ...data,
+      amount: parseCurrencyValue(data.amount)
+    };
+
+    // Remove campos vazios
+    const importantFields = ['transactionDate', 'title', 'amount'];
+    Object.keys(submitData).forEach(key => {
+      if (importantFields.includes(key)) {
+        return;
+      }
+      
+      const value = submitData[key];
+      if (value === '' || value === null || value === undefined) {
+        delete submitData[key];
+      } else if (typeof value === 'string' && value.trim() === '') {
+        delete submitData[key];
+      }
+    });
+
+    onSubmit(submitData);
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Editar Transferência"
+      size="lg"
+    >
+      <div className="space-y-6">
+        {/* Informações da transferência atual */}
+        <div className="bg-blue-50 p-4 rounded-lg">
+          <h4 className="text-sm font-medium text-blue-900 mb-2">
+            Transferência Atual
+          </h4>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-blue-700">Título:</span>
+              <span className="font-medium">{transfer.title}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-blue-700">Valor:</span>
+              <span className="font-medium">{formatCurrency(transfer.amount)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-blue-700">Data:</span>
+              <span className="font-medium">{formatDate(transfer.transactionDate)}</span>
+            </div>
+            {transfer.transferFromBank && transfer.transferToBank && (
+              <div className="flex justify-between">
+                <span className="text-blue-700">Transferência:</span>
+                <span className="font-medium">
+                  {transfer.transferFromBank.name} → {transfer.transferToBank.name}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Formulário de edição */}
+        <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Título"
+              placeholder="Título da transferência"
+              error={errors.title?.message}
+              {...register('title', { required: 'Título é obrigatório' })}
+            />
+            <Input
+              label="Valor"
+              type="text"
+              placeholder="R$ 0,00"
+              error={errors.amount?.message}
+              onInput={(e) => {
+                const target = e.target as HTMLInputElement;
+                const formattedValue = formatCurrencyInput(target.value);
+                setValue('amount', formattedValue);
+              }}
+              {...register('amount', { 
+                required: 'Valor é obrigatório',
+                validate: (value) => {
+                  if (!value || typeof value !== 'string') return 'Valor é obrigatório';
+                  const numericValue = parseCurrencyValue(value);
+                  if (numericValue <= 0) return 'Valor deve ser maior que zero';
+                  return true;
+                }
+              })}
+            />
+          </div>
+
+          <Input
+            label="Descrição"
+            placeholder="Descrição da transferência (opcional)"
+            {...register('description')}
+          />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Data da Transferência"
+              type="date"
+              error={errors.transactionDate?.message}
+              {...register('transactionDate', { required: 'Data da transferência é obrigatória' })}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Select
+              label="Categoria"
+              options={[
+                { value: '', label: 'Selecione uma categoria' },
+                ...categories.map(cat => ({ value: cat.id, label: cat.name })),
+              ]}
+              {...register('categoryId')}
+            />
+            <Select
+              label="Método de Pagamento"
+              options={[
+                { value: '', label: 'Selecione um método' },
+                ...paymentMethods.map(pm => ({ value: pm.id, label: pm.name })),
+              ]}
+              {...register('paymentMethodId')}
+            />
+          </div>
+
+          {/* Avisos importantes */}
+          <div className="bg-yellow-50 p-4 rounded-lg">
+            <h4 className="text-sm font-medium text-yellow-900 mb-2">
+              ⚠️ Informações Importantes
+            </h4>
+            <div className="text-sm text-yellow-800 space-y-1">
+              <div>• A edição afetará ambas as transações da transferência</div>
+              <div>• O valor será atualizado em ambas as contas</div>
+              <div>• A data será sincronizada entre as transações</div>
+              <div>• Categoria e método de pagamento serão aplicados a ambas</div>
+            </div>
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button type="submit" loading={isLoading}>
+              Atualizar Transferência
+            </Button>
+          </div>
+        </form>
+      </div>
+    </Modal>
   );
 };
 

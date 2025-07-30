@@ -7,11 +7,13 @@ import {
   AlertCircle, 
   Save,
   Target,
-  Calendar,
   DollarSign,
   Tag,
   Plus,
-  X
+  X,
+  ArrowRightLeft,
+  Edit,
+  Trash2
 } from 'lucide-react';
 import apiService from '../services/api';
 import { 
@@ -20,7 +22,9 @@ import {
   FinancialCategory,
   ApproveOfxImportResponse,
   Tag as TagType,
-  PaymentMethod
+  PaymentMethod,
+  CreateTransferRequest,
+  Bank
 } from '../types';
 import Button from '../components/ui/Button';
 import Select from '../components/ui/Select';
@@ -37,6 +41,7 @@ const OfxReview: React.FC = () => {
   const [summary, setSummary] = useState<OfxPendingTransactionSummary | null>(null);
   const [categories, setCategories] = useState<FinancialCategory[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [banks, setBanks] = useState<Bank[]>([]);
 
   const [filter, setFilter] = useState<'all' | 'uncategorized' | 'no-payment-method'>('all');
   const [tags, setTags] = useState<TagType[]>([]);
@@ -44,6 +49,12 @@ const OfxReview: React.FC = () => {
   const [showTagModal, setShowTagModal] = useState(false);
   const [currentTransactionId, setCurrentTransactionId] = useState<string>('');
   const [showCreateTagModal, setShowCreateTagModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showEditTransferModal, setShowEditTransferModal] = useState(false);
+  const [showDeleteTransferModal, setShowDeleteTransferModal] = useState(false);
+  const [selectedTransactionForTransfer, setSelectedTransactionForTransfer] = useState<OfxPendingTransaction | null>(null);
+  const [selectedTransferForEdit, setSelectedTransferForEdit] = useState<OfxPendingTransaction | null>(null);
+  const [selectedTransferForDelete, setSelectedTransferForDelete] = useState<OfxPendingTransaction | null>(null);
   const [createTagForm, setCreateTagForm] = useState({
     name: '',
     color: '#3B82F6',
@@ -76,12 +87,13 @@ const OfxReview: React.FC = () => {
     try {
       setLoading(true);
       
-      const [transactions, summaryData, categoriesData, tagsData, paymentMethodsData] = await Promise.all([
+      const [transactions, summaryData, categoriesData, tagsData, paymentMethodsData, banksData] = await Promise.all([
         apiService.getOfxPendingTransactionsByImport(importId!),
         apiService.getOfxPendingTransactionsSummary(importId!),
         apiService.getCategories(),
         apiService.getTags({ isActive: true }),
-        apiService.getPaymentMethods()
+        apiService.getPaymentMethods(),
+        apiService.getBanks()
       ]);
       
       // Debug logging
@@ -93,6 +105,7 @@ const OfxReview: React.FC = () => {
       console.log('Categories received:', categoriesData);
       console.log('Tags received:', tagsData);
       console.log('Payment Methods received:', paymentMethodsData);
+      console.log('Banks received:', banksData);
       
       // Ensure transactions is an array
       if (!Array.isArray(transactions)) {
@@ -101,41 +114,30 @@ const OfxReview: React.FC = () => {
         setPendingTransactions([]);
       } else {
         setPendingTransactions(transactions);
-        
-        // Inicializar tags selecionadas para cada transação
-        const initialTags = new Map();
-        transactions.forEach(transaction => {
-          if (transaction.tags && transaction.tags.length > 0) {
-            initialTags.set(transaction.id, transaction.tags.map(tag => tag.id));
-          }
-        });
-        setSelectedTags(initialTags);
       }
       
-      // A API retorna um objeto com {import, summary, transactions}
-      // Precisamos extrair o summary corretamente
-      const actualSummary = (summaryData as any).summary || summaryData;
-      const importData = (summaryData as any).import;
-      console.log('Summary for footer:', actualSummary);
-      console.log('Import data:', importData);
-      console.log('Full summaryData:', summaryData);
+      // Initialize tags for each transaction
+      const initialTags = new Map<string, string[]>();
+      transactions.forEach(transaction => {
+        initialTags.set(transaction.id, transaction.tags?.map(tag => tag.id) || []);
+      });
+      setSelectedTags(initialTags);
       
-      // Combinar dados do summary com dados do import
+      // Combine summary data
       const combinedSummary = {
-        ...actualSummary,
-        importDate: importData?.importDate || actualSummary?.importDate,
-        bank: importData?.bank || actualSummary?.bank,
-        fileName: importData?.fileName || actualSummary?.fileName
+        ...summaryData,
+        totalTransactions: transactions.length,
+        uncategorizedCount: transactions.filter(t => !t.suggestedCategoryId).length,
+        categorizedCount: transactions.filter(t => t.suggestedCategoryId).length,
       };
       
       setSummary(combinedSummary);
       setCategories(categoriesData);
       setTags(tagsData.data || []);
       setPaymentMethods(paymentMethodsData);
+      setBanks(banksData);
     } catch (error) {
-      console.error('Erro ao carregar dados:', error);
-      alert('Erro ao carregar dados da revisão');
-      navigate('/ofx-import');
+      console.error('Error loading data:', error);
     } finally {
       setLoading(false);
     }
@@ -143,18 +145,17 @@ const OfxReview: React.FC = () => {
 
   const handleCategoryChange = async (transactionId: string, categoryId: string) => {
     if (!categoryId) return;
-
+    
     try {
       setSaving(prev => new Set(prev).add(transactionId));
       
       await apiService.updateOfxTransactionCategory(transactionId, { categoryId });
       
-      // Atualizar a transação na lista local
-      setPendingTransactions(prev => 
-        prev.map(transaction => 
-          transaction.id === transactionId 
-            ? { 
-                ...transaction, 
+      setPendingTransactions(prev =>
+        prev.map(transaction =>
+          transaction.id === transactionId
+            ? {
+                ...transaction,
                 suggestedCategoryId: categoryId,
                 suggestedCategory: categories.find(cat => cat.id === categoryId)
               }
@@ -162,7 +163,7 @@ const OfxReview: React.FC = () => {
         )
       );
       
-      // Mostrar feedback visual rápido
+      // Remove from saving state after a delay to show the save indicator
       setTimeout(() => {
         setSaving(prev => {
           const newSet = new Set(prev);
@@ -172,30 +173,24 @@ const OfxReview: React.FC = () => {
       }, 1000);
       
     } catch (error) {
-      console.error('Erro ao atualizar categoria:', error);
+      console.error('Error updating category:', error);
       alert('Erro ao atualizar categoria');
-      setSaving(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(transactionId);
-        return newSet;
-      });
     }
   };
 
   const handlePaymentMethodChange = async (transactionId: string, paymentMethodId: string) => {
     if (!paymentMethodId) return;
-
+    
     try {
       setSaving(prev => new Set(prev).add(transactionId));
       
       await apiService.updateOfxTransactionPaymentMethod(transactionId, { paymentMethodId });
       
-      // Atualizar a transação na lista local
-      setPendingTransactions(prev => 
-        prev.map(transaction => 
-          transaction.id === transactionId 
-            ? { 
-                ...transaction, 
+      setPendingTransactions(prev =>
+        prev.map(transaction =>
+          transaction.id === transactionId
+            ? {
+                ...transaction,
                 finalPaymentMethodId: paymentMethodId,
                 suggestedPaymentMethod: paymentMethods.find(pm => pm.id === paymentMethodId)
               }
@@ -203,7 +198,7 @@ const OfxReview: React.FC = () => {
         )
       );
       
-      // Mostrar feedback visual rápido
+      // Remove from saving state after a delay to show the save indicator
       setTimeout(() => {
         setSaving(prev => {
           const newSet = new Set(prev);
@@ -213,17 +208,10 @@ const OfxReview: React.FC = () => {
       }, 1000);
       
     } catch (error) {
-      console.error('Erro ao atualizar método de pagamento:', error);
+      console.error('Error updating payment method:', error);
       alert('Erro ao atualizar método de pagamento');
-      setSaving(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(transactionId);
-        return newSet;
-      });
     }
   };
-
-
 
   const handleOpenTagModal = (transactionId: string) => {
     setCurrentTransactionId(transactionId);
@@ -236,28 +224,19 @@ const OfxReview: React.FC = () => {
       
       await apiService.updateOfxTransactionTags(transactionId, { tagIds });
       
-      // Atualizar tags selecionadas localmente
-      setSelectedTags(prev => {
-        const newMap = new Map(prev);
-        newMap.set(transactionId, tagIds);
-        return newMap;
-      });
-      
-      // Atualizar a transação na lista local
-      setPendingTransactions(prev => 
-        prev.map(transaction => 
-          transaction.id === transactionId 
-            ? { 
-                ...transaction, 
+      setPendingTransactions(prev =>
+        prev.map(transaction =>
+          transaction.id === transactionId
+            ? {
+                ...transaction,
                 tags: tags.filter(tag => tagIds.includes(tag.id))
               }
             : transaction
         )
       );
       
-      setShowTagModal(false);
+      setSelectedTags(prev => new Map(prev).set(transactionId, tagIds));
       
-      // Mostrar feedback visual rápido
       setTimeout(() => {
         setSaving(prev => {
           const newSet = new Set(prev);
@@ -267,13 +246,8 @@ const OfxReview: React.FC = () => {
       }, 1000);
       
     } catch (error) {
-      console.error('Erro ao atualizar tags:', error);
+      console.error('Error updating tags:', error);
       alert('Erro ao atualizar tags');
-      setSaving(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(transactionId);
-        return newSet;
-      });
     }
   };
 
@@ -284,95 +258,125 @@ const OfxReview: React.FC = () => {
       alert('Nome da tag é obrigatório');
       return;
     }
-
+    
     try {
       const newTag = await apiService.createTag(createTagForm);
-      
-      // Adicionar a nova tag à lista local
       setTags(prev => [...prev, newTag]);
-      
-      // Fechar modal e resetar formulário
       setShowCreateTagModal(false);
-      setCreateTagForm({
-        name: '',
-        color: '#3B82F6',
-        description: '',
-        isActive: true
-      });
-      
+      setCreateTagForm({ name: '', color: '#3B82F6', description: '', isActive: true });
       alert('Tag criada com sucesso!');
     } catch (error) {
-      console.error('Erro ao criar tag:', error);
+      console.error('Error creating tag:', error);
       alert('Erro ao criar tag');
     }
   };
 
   const getTransactionTags = (transactionId: string) => {
-    const selectedTagIds = selectedTags.get(transactionId) || [];
-    return tags.filter(tag => selectedTagIds.includes(tag.id));
+    return selectedTags.get(transactionId) || [];
   };
 
   const handleApproveImport = async () => {
-    if (!summary) return;
-
-    const uncategorizedCount = pendingTransactions.filter(t => !t.suggestedCategoryId).length;
+    if (!importId) return;
     
-    let confirmMessage = 'Tem certeza que deseja finalizar esta importação?\n\n';
-    confirmMessage += `✅ ${pendingTransactions.length} transações serão criadas\n`;
-    
-    if (uncategorizedCount > 0) {
-      confirmMessage += `⚠️ ${uncategorizedCount} transações sem categoria\n\n`;
-      confirmMessage += 'Transações sem categoria poderão ser categorizadas posteriormente.';
-    }
-
-    if (!confirm(confirmMessage)) {
-      return;
-    }
-
     try {
       setApproving(true);
-      
-      const response: ApproveOfxImportResponse = await apiService.approveOfxImport(importId!);
+      const response: ApproveOfxImportResponse = await apiService.approveOfxImport(importId);
       
       if (response.success) {
-        alert(`✅ Importação finalizada com sucesso!\n\n${response.createdTransactionsCount} transações criadas no banco.`);
+        alert(`Importação aprovada com sucesso! ${response.createdTransactionsCount} transações foram criadas.`);
         navigate('/ofx-import');
       } else {
-        alert(`❌ Erro na finalização: ${response.message}`);
+        alert(`Erro na importação: ${response.message}`);
       }
     } catch (error) {
-      console.error('Erro ao aprovar importação:', error);
-      alert('Erro ao finalizar importação');
+      console.error('Error approving import:', error);
+      alert('Erro ao aprovar importação');
     } finally {
       setApproving(false);
     }
   };
 
-  const getFilteredTransactions = () => {
-    // Ensure pendingTransactions is an array and not null/undefined
-    if (!pendingTransactions || !Array.isArray(pendingTransactions)) {
-      console.warn('pendingTransactions is not a valid array:', pendingTransactions);
-      return [];
-    }
+  const handleCreateTransfer = async (data: CreateTransferRequest) => {
+    if (!selectedTransactionForTransfer) return;
     
-    let filteredTransactions;
+    try {
+      setSaving(prev => new Set(prev).add(selectedTransactionForTransfer.id));
+      
+      // Criar a transferência
+      await apiService.createTransfer(data);
+      
+      // Remover a transação pendente da lista
+      setPendingTransactions(prev =>
+        prev.filter(transaction => transaction.id !== selectedTransactionForTransfer.id)
+      );
+      
+      setShowTransferModal(false);
+      setSelectedTransactionForTransfer(null);
+      
+      alert('Transferência criada com sucesso!');
+      
+      setTimeout(() => {
+        setSaving(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(selectedTransactionForTransfer.id);
+          return newSet;
+        });
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Error creating transfer:', error);
+      alert('Erro ao criar transferência');
+    }
+  };
+
+  const handleOpenTransferModal = (transaction: OfxPendingTransaction) => {
+    setSelectedTransactionForTransfer(transaction);
+    setShowTransferModal(true);
+  };
+
+  const handleEditTransfer = (transaction: OfxPendingTransaction) => {
+    setSelectedTransferForEdit(transaction);
+    setShowEditTransferModal(true);
+  };
+
+  const handleUpdateTransfer = (data: any) => {
+    if (selectedTransferForEdit) {
+      // Implementar atualização de transferência
+      console.log('Atualizando transferência:', data);
+      setShowEditTransferModal(false);
+      setSelectedTransferForEdit(null);
+    }
+  };
+
+  const handleDeleteTransfer = (transaction: OfxPendingTransaction) => {
+    setSelectedTransferForDelete(transaction);
+    setShowDeleteTransferModal(true);
+  };
+
+  const handleConfirmDeleteTransfer = () => {
+    if (selectedTransferForDelete) {
+      // Implementar exclusão de transferência
+      console.log('Excluindo transferência:', selectedTransferForDelete.id);
+      setShowDeleteTransferModal(false);
+      setSelectedTransferForDelete(null);
+    }
+  };
+
+  const getFilteredTransactions = () => {
+    let filtered = pendingTransactions;
+    
     switch (filter) {
       case 'uncategorized':
-        filteredTransactions = pendingTransactions.filter(t => !t.suggestedCategoryId);
+        filtered = filtered.filter(t => !t.suggestedCategoryId);
         break;
       case 'no-payment-method':
-        filteredTransactions = pendingTransactions.filter(t => !t.finalPaymentMethodId && !t.suggestedPaymentMethodId);
+        filtered = filtered.filter(t => !t.suggestedPaymentMethodId && !t.finalPaymentMethodId);
         break;
       default:
-        filteredTransactions = pendingTransactions;
+        break;
     }
     
-    // Ordenar por data, do primeiro ao último dia do mês
-    return filteredTransactions.sort((a, b) => {
-      const dateA = new Date(a.transactionDate);
-      const dateB = new Date(b.transactionDate);
-      return dateA.getTime() - dateB.getTime();
-    });
+    return filtered;
   };
 
   const formatDate = (dateString: string) => {
@@ -386,193 +390,151 @@ const OfxReview: React.FC = () => {
     }).format(amount / 100);
   };
 
-
-
   const getFilteredCategories = (transactionType: 'CREDIT' | 'DEBIT') => {
-    return categories.filter(category => {
-      // Se a transação é CREDIT, mostrar apenas categorias RECEIVABLE
-      if (transactionType === 'CREDIT') {
-        return category.type === 'RECEIVABLE';
-      }
-      // Se a transação é DEBIT, mostrar apenas categorias PAYABLE
-      if (transactionType === 'DEBIT') {
-        return category.type === 'PAYABLE';
-      }
-      // Se não conseguir determinar, mostrar todas
-      return true;
-    });
+    // Mapear tipos de transação para tipos de categoria
+    const categoryType = transactionType === 'CREDIT' ? 'RECEIVABLE' : 'PAYABLE';
+    return categories.filter(cat => cat.type === categoryType);
   };
 
+  const transactions = getFilteredTransactions();
 
+  function formatDateSafe(dateString?: string) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) ? '' : date.toLocaleDateString('pt-BR');
+  }
+
+  // Função para obter bancos de destino válidos (exclui o banco do OFX)
+  function getValidDestinationBanks() {
+    // Baseado no console.log, a estrutura é { import: {...}, summary: {...}, transactions: [...] }
+    // O banco está em summary.import.bank
+    const currentBankId = (summary as any)?.import?.bank?.id;
+    if (!currentBankId) return banks;
+    return banks.filter(bank => bank.id !== currentBankId);
+  }
+
+  // Função para obter a data de importação correta
+  function getImportDate() {
+    return (summary as any)?.import?.importDate || summary?.importDate;
+  }
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Carregando revisão OFX...</p>
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
         </div>
-      </div>
+      </Layout>
     );
   }
 
   if (!summary) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Importação não encontrada</h2>
-          <p className="text-gray-600 mb-4">A importação solicitada não foi encontrada ou não está disponível para revisão.</p>
-          <Button onClick={() => navigate('/ofx-import')}>
-            Voltar para Importações
-          </Button>
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-red-600">Erro ao carregar dados da revisão</div>
         </div>
-      </div>
+      </Layout>
     );
   }
-
-  // Ensure we have valid data before rendering
-  if (!Array.isArray(pendingTransactions)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Erro ao carregar dados</h2>
-          <p className="text-gray-600 mb-4">Não foi possível carregar as transações da importação.</p>
-          <Button onClick={() => navigate('/ofx-import')}>
-            Voltar para Importações
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const filteredTransactions = getFilteredTransactions();
 
   return (
     <Layout>
-      <div className="py-6">
-        <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button
-            onClick={() => navigate('/ofx-import')}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Voltar
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Revisão OFX</h1>
-            <p className="text-gray-600">{summary.fileName}</p>
-          </div>
-        </div>
-        <Button
-          onClick={handleApproveImport}
-          disabled={approving}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
-        >
-          {approving ? (
-            <>
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-              Finalizando...
-            </>
-          ) : (
-            <>
-              <CheckCircle className="h-4 w-4" />
-              Finalizar Importação
-            </>
-          )}
-        </Button>
-      </div>
-
-      {/* Resumo */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center">
-            <Target className="h-5 w-5 text-blue-500 mr-2" />
-            <span className="text-sm font-medium text-blue-900">Total</span>
-          </div>
-          <p className="text-2xl font-bold text-blue-900">{summary?.totalTransactions || 0}</p>
-          <p className="text-xs text-blue-700">transações</p>
-        </div>
-        
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 text-gray-500 mr-2" />
-            <span className="text-sm font-medium text-gray-900">Sem Categoria</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{(summary as any).uncategorized}</p>
-          <p className="text-xs text-gray-700">sem categoria</p>
-        </div>
-
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="flex items-center">
-            <DollarSign className="h-5 w-5 text-green-500 mr-2" />
-            <span className="text-sm font-medium text-green-900">Métodos Sugeridos</span>
-          </div>
-          <p className="text-2xl font-bold text-green-900">
-            {pendingTransactions.filter(t => t.suggestedPaymentMethodId).length}
-          </p>
-          <p className="text-xs text-green-700">com sugestão</p>
-        </div>
-      </div>
-
-      {/* Filtros */}
-      <div className="bg-white shadow rounded-lg p-4">
+      <div className="space-y-6">
+        {/* Header */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-gray-700">Filtrar por:</span>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => setFilter('all')}
-                variant={filter === 'all' ? 'primary' : 'outline'}
-                size="sm"
-              >
-                Todas ({summary?.totalTransactions || 0})
-              </Button>
-              <Button
-                onClick={() => setFilter('uncategorized')}
-                variant={filter === 'uncategorized' ? 'primary' : 'outline'}
-                size="sm"
-              >
-                Sem Categoria ({(summary as any).uncategorized || 0})
-              </Button>
-              <Button
-                onClick={() => setFilter('no-payment-method')}
-                variant={filter === 'no-payment-method' ? 'primary' : 'outline'}
-                size="sm"
-              >
-                Sem Método ({pendingTransactions.filter(t => !t.finalPaymentMethodId && !t.suggestedPaymentMethodId).length})
-              </Button>
+          <div className="flex items-center space-x-4">
+            <Button
+              onClick={() => navigate('/ofx-import')}
+              variant="outline"
+              size="sm"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Voltar
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Revisão de Importação OFX</h1>
+              <p className="text-gray-600">
+                {summary.fileName}
+                {formatDateSafe(getImportDate()) && ` - ${formatDateSafe(getImportDate())}`}
+              </p>
             </div>
           </div>
-          <div className="text-sm text-gray-600">
-            Mostrando {filteredTransactions.length} de {summary?.totalTransactions || 0} transações
-          </div>
+          <Button
+            onClick={handleApproveImport}
+            loading={approving}
+            disabled={transactions.length === 0}
+          >
+            <CheckCircle className="h-4 w-4 mr-2" />
+            Aprovar Importação
+          </Button>
         </div>
-      </div>
 
-      {/* Lista de Transações */}
-      <div className="bg-white shadow rounded-lg overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-medium text-gray-900">Transações para Revisão</h2>
-        </div>
-        
-        {filteredTransactions.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-            <p>Nenhuma transação encontrada com o filtro selecionado</p>
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center">
+              <Target className="h-5 w-5 text-blue-500 mr-2" />
+              <span className="text-sm font-medium text-blue-900">Total de Transações</span>
+            </div>
+            <p className="text-2xl font-bold text-blue-900">{summary.totalTransactions}</p>
+            <p className="text-xs text-blue-700">para revisão</p>
           </div>
-        ) : (
+          
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <div className="flex items-center">
+              <AlertCircle className="h-5 w-5 text-yellow-500 mr-2" />
+              <span className="text-sm font-medium text-yellow-900">Sem Categoria</span>
+            </div>
+            <p className="text-2xl font-bold text-yellow-900">{summary.uncategorizedCount}</p>
+            <p className="text-xs text-yellow-700">precisam de categoria</p>
+          </div>
+          
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <div className="flex items-center">
+              <DollarSign className="h-5 w-5 text-green-500 mr-2" />
+              <span className="text-sm font-medium text-green-900">Métodos Sugeridos</span>
+            </div>
+            <p className="text-2xl font-bold text-green-900">
+              {pendingTransactions.filter(t => t.suggestedPaymentMethodId).length}
+            </p>
+            <p className="text-xs text-green-700">com sugestão</p>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex space-x-2">
+          <Button
+            onClick={() => setFilter('all')}
+            variant={filter === 'all' ? 'primary' : 'outline'}
+            size="sm"
+          >
+            Todas ({pendingTransactions.length})
+          </Button>
+          <Button
+            onClick={() => setFilter('uncategorized')}
+            variant={filter === 'uncategorized' ? 'primary' : 'outline'}
+            size="sm"
+          >
+            Sem Categoria ({pendingTransactions.filter(t => !t.suggestedCategoryId).length})
+          </Button>
+          <Button
+            onClick={() => setFilter('no-payment-method')}
+            variant={filter === 'no-payment-method' ? 'primary' : 'outline'}
+            size="sm"
+          >
+            Sem Método ({pendingTransactions.filter(t => !t.finalPaymentMethodId && !t.suggestedPaymentMethodId).length})
+          </Button>
+        </div>
+
+        {/* Transactions Table */}
+        <div className="bg-white rounded-lg shadow overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Descrição
+                    Transação
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Valor
@@ -583,50 +545,46 @@ const OfxReview: React.FC = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Categoria
                   </th>
-
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Método de Pagamento
                   </th>
-
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Tags
                   </th>
-
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Ações
+                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {Array.isArray(filteredTransactions) && filteredTransactions.map((transaction) => (
+                {transactions.map((transaction) => (
                   <tr key={transaction.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900 font-medium break-words max-w-xs">
-                        {transaction.title}
-                      </div>
-                      {transaction.description && (
-                        <div className="text-xs text-gray-500 break-words max-w-xs mt-1">
-                          {transaction.description}
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {transaction.title}
                         </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center">
-                        <DollarSign className="h-4 w-4 text-gray-400 mr-1" />
-                        <span className={`text-sm font-semibold ${
-                          transaction.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {transaction.type === 'CREDIT' ? '+' : '-'}{formatCurrency(transaction.amount)}
-                        </span>
+                        {transaction.description && (
+                          <div className="text-sm text-gray-500">
+                            {transaction.description}
+                          </div>
+                        )}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center text-sm text-gray-900">
-                        <Calendar className="h-4 w-4 text-gray-400 mr-1" />
-                        {formatDate(transaction.transactionDate)}
-                      </div>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`text-sm font-medium ${
+                        transaction.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {transaction.type === 'CREDIT' ? '+' : '-'} {formatCurrency(transaction.amount)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatDate(transaction.transactionDate)}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <Select
-                          value={transaction.suggestedCategoryId || ''}
+                                                     value={transaction.suggestedCategoryId || ''}
                           onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
                             handleCategoryChange(transaction.id, e.target.value);
                           }}
@@ -647,7 +605,6 @@ const OfxReview: React.FC = () => {
                         )}
                       </div>
                     </td>
-
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <Select
@@ -672,279 +629,506 @@ const OfxReview: React.FC = () => {
                         )}
                       </div>
                     </td>
-
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
-                        <div className="flex flex-wrap gap-1">
-                          {getTransactionTags(transaction.id).map((tag) => (
-                            <span
-                              key={tag.id}
-                              className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
-                              style={{ 
-                                backgroundColor: `${tag.color}20`, 
-                                color: tag.color,
-                                border: `1px solid ${tag.color}40`
-                              }}
-                            >
-                              {tag.name}
-                            </span>
-                          ))}
-                        </div>
                         <Button
                           onClick={() => handleOpenTagModal(transaction.id)}
-                          disabled={saving.has(transaction.id)}
                           variant="outline"
                           size="sm"
                           className="flex items-center gap-1"
                         >
-                          {saving.has(transaction.id) ? (
-                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div>
-                          ) : (
-                            <Plus className="h-3 w-3" />
-                          )}
-                          Tags
+                          <Tag className="h-3 w-3" />
+                          Tags ({getTransactionTags(transaction.id).length})
                         </Button>
                       </div>
                     </td>
-
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <div className="flex items-center justify-end space-x-2">
+                        <Button
+                          onClick={() => handleOpenTransferModal(transaction)}
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-1"
+                          title="Transformar em Transferência"
+                        >
+                          <ArrowRightLeft className="h-3 w-3" />
+                          Transferir
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
-
-      {/* Rodapé Fixo */}
-      <div className="bg-white shadow-lg border border-gray-200 rounded-lg p-4 sticky bottom-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-6 text-sm text-gray-600">
-            <span>📁 {summary.bank?.name}</span>
-            <span>📅 {formatDate(summary.importDate)}</span>
-            <span>📊 {summary.totalTransactions} transações</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              onClick={() => navigate('/ofx-import')}
-              variant="outline"
-            >
-              Salvar e Voltar
-            </Button>
-            <Button
-              onClick={handleApproveImport}
-              disabled={approving}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
-            >
-              {approving ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  Finalizando...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="h-4 w-4" />
-                  Finalizar Importação
-                </>
-              )}
-            </Button>
-          </div>
         </div>
-      </div>
 
-      {/* Modal de Seleção de Tags */}
-      {showTagModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowTagModal(false)}></div>
-            
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">Selecionar Tags</h3>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      onClick={() => setShowCreateTagModal(true)}
-                      variant="outline"
-                      size="sm"
-                      className="flex items-center gap-1"
-                    >
-                      <Plus className="h-3 w-3" />
-                      Criar Tag
-                    </Button>
+        {/* Tag Selection Modal */}
+        {showTagModal && (
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+              <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowTagModal(false)}></div>
+              
+              <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">Selecionar Tags</h3>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => setShowCreateTagModal(true)}
+                        variant="outline"
+                        size="sm"
+                        className="flex items-center gap-1"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Criar Tag
+                      </Button>
+                      <button
+                        onClick={() => setShowTagModal(false)}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3 max-h-60 overflow-y-auto">
+                    {tags.map((tag) => (
+                      <label key={tag.id} className="flex items-center space-x-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={getTransactionTags(currentTransactionId).includes(tag.id)}
+                          onChange={(e) => {
+                            const currentTags = getTransactionTags(currentTransactionId);
+                            const newTags = e.target.checked
+                              ? [...currentTags, tag.id]
+                              : currentTags.filter(id => id !== tag.id);
+                            handleUpdateTags(currentTransactionId, newTags);
+                          }}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <div className="flex items-center space-x-2">
+                          <div
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: tag.color || '#3B82F6' }}
+                          ></div>
+                          <span className="text-sm text-gray-900">{tag.name}</span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Create Tag Modal */}
+        {showCreateTagModal && (
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+              <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowCreateTagModal(false)}></div>
+              
+              <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">Criar Nova Tag</h3>
                     <button
-                      onClick={() => setShowTagModal(false)}
+                      onClick={() => setShowCreateTagModal(false)}
                       className="text-gray-400 hover:text-gray-600"
                     >
                       <X className="h-5 w-5" />
                     </button>
                   </div>
-                </div>
-                
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-2">
-                    {tags.map((tag) => {
-                      const isSelected = selectedTags.get(currentTransactionId)?.includes(tag.id) || false;
-                      return (
-                        <button
-                          key={tag.id}
-                          onClick={() => {
-                            const currentSelected = selectedTags.get(currentTransactionId) || [];
-                            const newSelected = isSelected
-                              ? currentSelected.filter(id => id !== tag.id)
-                              : [...currentSelected, tag.id];
-                            
-                            setSelectedTags(prev => {
-                              const newMap = new Map(prev);
-                              newMap.set(currentTransactionId, newSelected);
-                              return newMap;
-                            });
-                          }}
-                          className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
-                            isSelected
-                              ? 'border-primary-500 bg-primary-50'
-                              : 'border-gray-200 hover:border-gray-300'
-                          }`}
-                        >
-                          <div 
-                            className="w-4 h-4 rounded-full border border-gray-300"
-                            style={{ backgroundColor: tag.color }}
-                          ></div>
-                          <span className="text-sm font-medium">{tag.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
                   
-                  {tags.length === 0 && (
-                    <div className="text-center py-4 text-gray-500">
-                      <Tag className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                      <p>Nenhuma tag disponível</p>
+                  <form onSubmit={handleCreateTag} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Nome da Tag
+                      </label>
+                      <Input
+                        value={createTagForm.name}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCreateTagForm(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="Nome da tag"
+                        required
+                      />
                     </div>
-                  )}
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Cor
+                      </label>
+                      <Select
+                        value={createTagForm.color}
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCreateTagForm(prev => ({ ...prev, color: e.target.value }))}
+                        options={colors}
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Descrição (opcional)
+                      </label>
+                      <textarea
+                        value={createTagForm.description}
+                        onChange={(e) => setCreateTagForm(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Descrição da tag..."
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        rows={3}
+                      />
+                    </div>
+                    
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="isActive"
+                        checked={createTagForm.isActive}
+                        onChange={(e) => setCreateTagForm(prev => ({ ...prev, isActive: e.target.checked }))}
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">
+                        Tag ativa
+                      </label>
+                    </div>
+                    
+                    <div className="flex justify-end space-x-3 pt-4">
+                      <Button type="button" variant="secondary" onClick={() => setShowCreateTagModal(false)}>
+                        Cancelar
+                      </Button>
+                      <Button type="submit">
+                        Criar Tag
+                      </Button>
+                    </div>
+                  </form>
                 </div>
-              </div>
-              
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <Button
-                  onClick={() => {
-                    const selectedTagIds = selectedTags.get(currentTransactionId) || [];
-                    handleUpdateTags(currentTransactionId, selectedTagIds);
-                  }}
-                  className="w-full sm:w-auto sm:ml-3"
-                >
-                  Salvar Tags
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowTagModal(false)}
-                  className="w-full sm:w-auto mt-3 sm:mt-0"
-                >
-                  Cancelar
-                </Button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Modal de Criação de Tags */}
-      {showCreateTagModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowCreateTagModal(false)}></div>
-            
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">Criar Nova Tag</h3>
-                  <button
-                    onClick={() => setShowCreateTagModal(false)}
-                    className="text-gray-400 hover:text-gray-600"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
+        {/* Modal de Transferência */}
+        {showTransferModal && selectedTransactionForTransfer && (
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+              <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowTransferModal(false)}></div>
+              
+              <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">Transferir Transação</h3>
+                    <button
+                      onClick={() => setShowTransferModal(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Transação a Transferir:
+                      </label>
+                      <div className="bg-gray-100 p-3 rounded-md text-sm text-gray-900">
+                        {selectedTransactionForTransfer.title}
+                        <br />
+                        {selectedTransactionForTransfer.description}
+                        <br />
+                        {formatCurrency(selectedTransactionForTransfer.amount)}
+                        <br />
+                        {formatDate(selectedTransactionForTransfer.transactionDate)}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Para Conta:
+                      </label>
+                      <Select
+                        value={''} // This will be atualizado pelo usuário
+                        onChange={() => {}} // Placeholder
+                        options={getValidDestinationBanks().map(bank => ({ value: bank.id, label: bank.name }))}
+                        className="min-w-0 w-full"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Valor da Transferência:
+                      </label>
+                      <Input
+                        type="number"
+                        value={selectedTransactionForTransfer.amount / 100} // Display as currency
+                        onChange={() => {}} // Placeholder
+                        placeholder="Valor da transferência"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Data da Transferência:
+                      </label>
+                      <Input
+                        type="date"
+                        value={selectedTransactionForTransfer.transactionDate.split('T')[0]}
+                        onChange={() => {}} // Placeholder
+                        placeholder="Data da transferência"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Descrição da Transferência:
+                      </label>
+                      <textarea
+                        value={`Transferência de ${selectedTransactionForTransfer.title} para conta`}
+                        onChange={() => {}} // Placeholder
+                        placeholder="Descrição opcional da transferência..."
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        rows={3}
+                      />
+                    </div>
+
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="isActive"
+                        checked={true} // Transferências são sempre ativas
+                        onChange={() => {}} // Placeholder
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">
+                        Transferência ativa
+                      </label>
+                    </div>
+                  </div>
                 </div>
                 
-                <form onSubmit={handleCreateTag} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Nome *
-                    </label>
-                    <Input
-                      type="text"
-                      value={createTagForm.name}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCreateTagForm({ ...createTagForm, name: e.target.value })}
-                      placeholder="Ex: Alimentação, Transporte, Lazer..."
-                      required
-                    />
-                  </div>
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <Button
+                    onClick={() => {
+                      const transferData: CreateTransferRequest = {
+                        title: `Transferência de ${selectedTransactionForTransfer.title}`,
+                        description: `Transferência de ${selectedTransactionForTransfer.title} para conta`,
+                        amount: selectedTransactionForTransfer.amount,
+                        fromBankId: '', // Será determinado pelo backend
+                        toBankId: '', // Será determinado pelo backend
+                        transactionDate: selectedTransactionForTransfer.transactionDate
+                      };
+                      handleCreateTransfer(transferData);
+                    }}
+                    className="w-full sm:w-auto sm:ml-3"
+                  >
+                    <ArrowRightLeft className="h-4 w-4 mr-2" />
+                    Criar Transferência
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowTransferModal(false)}
+                    className="w-full sm:w-auto mt-3 sm:mt-0"
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Cor
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <div 
-                        className="w-8 h-8 rounded-full border border-gray-300"
-                        style={{ backgroundColor: createTagForm.color }}
-                      ></div>
-                      <Select
-                        value={createTagForm.color}
-                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCreateTagForm({ ...createTagForm, color: e.target.value })}
-                        options={colors}
-                        className="flex-1"
+        {/* Modal de Edição de Transferência */}
+        {showEditTransferModal && selectedTransferForEdit && (
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+              <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowEditTransferModal(false)}></div>
+              
+              <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">Editar Transferência</h3>
+                    <button
+                      onClick={() => setShowEditTransferModal(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Transferência:
+                      </label>
+                      <div className="bg-gray-100 p-3 rounded-md text-sm text-gray-900">
+                        {selectedTransferForEdit.title}
+                        <br />
+                        {selectedTransferForEdit.description}
+                        <br />
+                        {formatCurrency(selectedTransferForEdit.amount)}
+                        <br />
+                        {formatDate(selectedTransferForEdit.transactionDate)}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Título:
+                      </label>
+                      <Input
+                        value={selectedTransferForEdit.title}
+                        onChange={() => {}} // Placeholder
+                        placeholder="Título da transferência"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Descrição:
+                      </label>
+                      <textarea
+                        value={selectedTransferForEdit.description || ''}
+                        onChange={() => {}} // Placeholder
+                        placeholder="Descrição da transferência..."
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        rows={3}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Valor:
+                      </label>
+                      <Input
+                        type="number"
+                        value={selectedTransferForEdit.amount / 100}
+                        onChange={() => {}} // Placeholder
+                        placeholder="Valor da transferência"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Data:
+                      </label>
+                      <Input
+                        type="date"
+                        value={selectedTransferForEdit.transactionDate.split('T')[0]}
+                        onChange={() => {}} // Placeholder
+                        placeholder="Data da transferência"
                       />
                     </div>
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Descrição
-                    </label>
-                    <textarea
-                      value={createTagForm.description}
-                      onChange={(e) => setCreateTagForm({ ...createTagForm, description: e.target.value })}
-                      placeholder="Descrição opcional da tag..."
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      rows={3}
-                    />
-                  </div>
-
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="isActive"
-                      checked={createTagForm.isActive}
-                      onChange={(e) => setCreateTagForm({ ...createTagForm, isActive: e.target.checked })}
-                      className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">
-                      Tag ativa
-                    </label>
-                  </div>
-                </form>
-              </div>
-              
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <Button
-                  onClick={handleCreateTag}
-                  className="w-full sm:w-auto sm:ml-3"
-                >
-                  Criar Tag
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowCreateTagModal(false)}
-                  className="w-full sm:w-auto mt-3 sm:mt-0"
-                >
-                  Cancelar
-                </Button>
+                </div>
+                
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <Button
+                    onClick={() => {
+                      // Implementar atualização
+                      setShowEditTransferModal(false);
+                    }}
+                    className="w-full sm:w-auto sm:ml-3"
+                  >
+                    <Edit className="h-4 w-4 mr-2" />
+                    Atualizar Transferência
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowEditTransferModal(false)}
+                    className="w-full sm:w-auto mt-3 sm:mt-0"
+                  >
+                    Cancelar
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
-        </div>
+        )}
+
+        {/* Modal de Exclusão de Transferência */}
+        {showDeleteTransferModal && selectedTransferForDelete && (
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+              <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowDeleteTransferModal(false)}></div>
+              
+              <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">Confirmar Exclusão</h3>
+                    <button
+                      onClick={() => setShowDeleteTransferModal(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0">
+                        <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                          <Trash2 className="h-5 w-5 text-red-600" />
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">
+                          Excluir Transferência
+                        </h3>
+                        <p className="text-gray-700 mb-4">
+                          Tem certeza que deseja excluir a transferência "{selectedTransferForDelete.title}"?
+                        </p>
+                        
+                        {/* Informações da transferência */}
+                        <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-600">Título:</span>
+                              <span className="text-sm font-medium">{selectedTransferForDelete.title}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-600">Valor:</span>
+                              <span className="text-sm font-medium">
+                                {formatCurrency(selectedTransferForDelete.amount)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-600">Data:</span>
+                              <span className="text-sm font-medium">{formatDate(selectedTransferForDelete.transactionDate)}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <p className="text-sm text-gray-600">
+                          Esta ação não pode ser desfeita. A transferência será permanentemente removida.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <Button
+                    onClick={() => {
+                      handleConfirmDeleteTransfer();
+                    }}
+                    variant="danger"
+                    className="w-full sm:w-auto sm:ml-3"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Excluir Transferência
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowDeleteTransferModal(false)}
+                    className="w-full sm:w-auto mt-3 sm:mt-0"
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   );

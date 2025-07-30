@@ -73,16 +73,41 @@ const Dashboard: React.FC = () => {
     if (!banks.length || !transactions.length) return banks;
 
     return banks.map(bank => {
-      const bankTransactions = transactions.filter(t => t.bankId === bank.id);
+      // Para transferências, incluir transações onde o banco é origem OU destino
+      const bankTransactions = transactions.filter(t => {
+        if (t.type === 'TRANSFER') {
+          return t.transferFromBankId === bank.id || t.transferToBankId === bank.id;
+        } else {
+          return t.bankId === bank.id;
+        }
+      });
       
-      // Calcular saldo baseado nas transações
-      const transactionBalance = bankTransactions.reduce((total, transaction) => {
+      // ETAPA 1: Calcular apenas CREDIT e DEBIT (ignorar TRANSFER)
+      const creditDebitBalance = bankTransactions.reduce((total, transaction) => {
         if (transaction.type === 'CREDIT') {
           return total + Number(transaction.amount);
-        } else {
+        } else if (transaction.type === 'DEBIT') {
           return total - Number(transaction.amount);
         }
+        return total;
       }, 0);
+
+      // ETAPA 2: Processar transferências separadamente
+      const transferBalance = transactions
+        .filter(t => t.type === 'TRANSFER')
+        .reduce((total, transfer) => {
+          if (transfer.transferFromBankId === bank.id) {
+            // Banco é origem: subtrair valor
+            return total - Number(transfer.amount);
+          } else if (transfer.transferToBankId === bank.id) {
+            // Banco é destino: adicionar valor
+            return total + Number(transfer.amount);
+          }
+          return total;
+        }, 0);
+
+      // TOTAL = CREDIT/DEBIT + TRANSFERÊNCIAS
+      const transactionBalance = creditDebitBalance + transferBalance;
 
       // Saldo real = saldo inicial + transações
       const realBalance = bank.balance + transactionBalance;
@@ -99,7 +124,45 @@ const Dashboard: React.FC = () => {
     // Filtrar transações por banco selecionado
     const filteredTransactions = selectedBank === 'all' 
       ? transactions 
-      : transactions.filter(t => t.bankId === selectedBank);
+      : transactions.filter(t => {
+          if (t.type === 'TRANSFER') {
+            return t.transferFromBankId === selectedBank || t.transferToBankId === selectedBank;
+          } else {
+            return t.bankId === selectedBank;
+          }
+        });
+
+    // Função helper para calcular créditos considerando transferências
+    const calculateCredits = (transactionList: any[]) => {
+      return transactionList.reduce((sum, t) => {
+        if (t.type === 'CREDIT') {
+          return sum + Number(t.amount);
+        } else if (t.type === 'TRANSFER' && selectedBank !== 'all') {
+          // Para transferências, verificar se é entrada para o banco selecionado
+          if (t.transferToBankId === selectedBank) {
+            return sum + Number(t.amount);
+          }
+        }
+        // Para 'all banks', transferências são ignoradas pois se anulam
+        return sum;
+      }, 0);
+    };
+
+    // Função helper para calcular débitos considerando transferências
+    const calculateDebits = (transactionList: any[]) => {
+      return transactionList.reduce((sum, t) => {
+        if (t.type === 'DEBIT') {
+          return sum + Number(t.amount);
+        } else if (t.type === 'TRANSFER' && selectedBank !== 'all') {
+          // Para transferências, verificar se é saída do banco selecionado
+          if (t.transferFromBankId === selectedBank) {
+            return sum + Number(t.amount);
+          }
+        }
+        // Para 'all banks', transferências são ignoradas pois se anulam
+        return sum;
+      }, 0);
+    };
 
     if (!filteredTransactions.length) {
       return {
@@ -150,22 +213,12 @@ const Dashboard: React.FC = () => {
     });
 
     // Calcular receitas e despesas do mês atual
-    const currentMonthReceivable = currentMonthTransactions
-      .filter(t => t.type === 'CREDIT')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
-
-    const currentMonthPayable = currentMonthTransactions
-      .filter(t => t.type === 'DEBIT')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+    const currentMonthReceivable = calculateCredits(currentMonthTransactions);
+    const currentMonthPayable = calculateDebits(currentMonthTransactions);
 
     // Calcular receitas e despesas do mês anterior
-    const previousMonthReceivable = previousMonthTransactions
-      .filter(t => t.type === 'CREDIT')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
-
-    const previousMonthPayable = previousMonthTransactions
-      .filter(t => t.type === 'DEBIT')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+    const previousMonthReceivable = calculateCredits(previousMonthTransactions);
+    const previousMonthPayable = calculateDebits(previousMonthTransactions);
 
     // Calcular variações percentuais
     const receivableVariation = previousMonthReceivable > 0 
@@ -177,13 +230,8 @@ const Dashboard: React.FC = () => {
       : currentMonthPayable > 0 ? 100 : 0;
 
     // Calcular totais baseado no tipo de transação bancária
-    const totalReceivable = periodFilteredTransactions
-      .filter(t => t.type === 'CREDIT')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
-
-    const totalPayable = periodFilteredTransactions
-      .filter(t => t.type === 'DEBIT')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+    const totalReceivable = calculateCredits(periodFilteredTransactions);
+    const totalPayable = calculateDebits(periodFilteredTransactions);
 
     const totalPaid = periodFilteredTransactions
       .filter(t => t.status === 'CONFIRMED')
@@ -272,7 +320,16 @@ const Dashboard: React.FC = () => {
 
     // Agrupar despesas por categoria no mês atual
     currentMonthTransactions.forEach(t => {
-      if (t.type === 'DEBIT' && t.category) {
+      let isDebit = false;
+      
+      if (t.type === 'DEBIT') {
+        isDebit = true;
+      } else if (t.type === 'TRANSFER' && selectedBank !== 'all' && t.transferFromBankId === selectedBank) {
+        // Transferência de saída do banco selecionado conta como débito
+        isDebit = true;
+      }
+      
+      if (isDebit && t.category) {
         const categoryName = t.category.name;
         const current = categoriesCurrentMonth.get(categoryName) || 0;
         categoriesCurrentMonth.set(categoryName, current + Number(t.amount));
@@ -281,7 +338,16 @@ const Dashboard: React.FC = () => {
 
     // Agrupar despesas por categoria no mês anterior
     previousMonthTransactions.forEach(t => {
-      if (t.type === 'DEBIT' && t.category) {
+      let isDebit = false;
+      
+      if (t.type === 'DEBIT') {
+        isDebit = true;
+      } else if (t.type === 'TRANSFER' && selectedBank !== 'all' && t.transferFromBankId === selectedBank) {
+        // Transferência de saída do banco selecionado conta como débito
+        isDebit = true;
+      }
+      
+      if (isDebit && t.category) {
         const categoryName = t.category.name;
         const current = categoriesPreviousMonth.get(categoryName) || 0;
         categoriesPreviousMonth.set(categoryName, current + Number(t.amount));
@@ -446,7 +512,7 @@ const Dashboard: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 -mx-12">
+    <div className="space-y-6 overflow-x-hidden">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-3 sm:space-y-0">
         <div className="min-w-0 flex-1">
@@ -462,10 +528,10 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Layout Principal - 3 Colunas */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-0">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-0 w-full">
         
         {/* Coluna Esquerda - Métricas e Gráficos (9 colunas) */}
-        <div className="xl:col-span-9 space-y-6 xl:pr-3">
+        <div className="xl:col-span-9 space-y-6 xl:pr-3 min-w-0">
           
           {/* Cards de Estatísticas */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -855,7 +921,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Coluna Direita - Calendário e Compromissos (3 colunas) */}
-        <div className="xl:col-span-3 space-y-6 xl:pl-2">
+        <div className="xl:col-span-3 space-y-6 xl:pl-2 min-w-0">
           
           {/* Saldo Atual - Contas */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -884,7 +950,7 @@ const Dashboard: React.FC = () => {
               </button>
               
               {isBankDropdownOpen && (
-                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto">
+                <div className="absolute z-30 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto">
                   <button
                     onClick={() => {
                       setSelectedBank('all');
