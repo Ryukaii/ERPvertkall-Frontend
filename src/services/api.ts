@@ -57,8 +57,13 @@ class ApiService {
 
   private initializeApi() {
     try {
+      // Get API URL from environment variable, fallback to localhost for development
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      
+      console.log('Initializing API with URL:', apiUrl);
+      
       this.api = axios.create({
-        baseURL: 'http://localhost:3000/api',
+        baseURL: apiUrl,
         headers: {
           'Content-Type': 'application/json',
         },
