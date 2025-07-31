@@ -138,6 +138,14 @@ const Categories: React.FC = () => {
 
       {/* Categories Grid */}
       <div className="space-y-6">
+        {deleteMutation.isLoading && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
+              <span className="text-blue-800">Excluindo categoria...</span>
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {isLoading ? (
             <div className="col-span-full flex items-center justify-center h-64">
@@ -176,10 +184,15 @@ const Categories: React.FC = () => {
                     </button>
                     <button
                       onClick={() => handleDeleteCategory(category.id)}
-                      className="text-red-600 hover:text-red-900 transition-colors"
+                      className="text-red-600 hover:text-red-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Excluir"
+                      disabled={deleteMutation.isLoading}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      {deleteMutation.isLoading ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
                     </button>
                   </div>
                 </div>
