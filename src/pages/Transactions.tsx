@@ -65,10 +65,10 @@ const Transactions: React.FC = () => {
   const queryClient = useQueryClient();
 
   // Queries
-  const { data: banks } = useQuery(['banks'], () => apiService.getBanks());
+  const { data: banks, isLoading: isLoadingBanks } = useQuery(['banks'], () => apiService.getBanks());
   
   // Buscar todas as transações para cálculo de saldo
-  const { data: allTransactionsData } = useQuery(
+  const { data: allTransactionsData, isLoading: isLoadingAllTransactions } = useQuery(
     ['allBankTransactions'],
     () => apiService.getAllBankTransactions(),
     {
@@ -76,7 +76,7 @@ const Transactions: React.FC = () => {
     }
   );
   
-  const { data: transactionsData, isLoading, error } = useQuery(
+  const { data: transactionsData, isLoading: isLoadingTransactions, error } = useQuery(
     ['bankTransactions', selectedBank, filters],
     () => selectedBank === 'all' ? apiService.getAllBankTransactions(filters) : selectedBank ? apiService.getBankTransactions(selectedBank, filters) : null,
     {
@@ -87,8 +87,14 @@ const Transactions: React.FC = () => {
     }
   );
 
-  const { data: categories } = useQuery(['categories'], () => apiService.getCategories());
-  const { data: paymentMethods } = useQuery(['paymentMethods'], () => apiService.getPaymentMethods());
+  const { data: categories, isLoading: isLoadingCategories } = useQuery(['categories'], () => apiService.getCategories());
+  const { data: paymentMethods, isLoading: isLoadingPaymentMethods } = useQuery(['paymentMethods'], () => apiService.getPaymentMethods());
+
+  // Loading global: espera todas as principais APIs
+  const isAnyLoading = isLoadingBanks || isLoadingAllTransactions || isLoadingTransactions || isLoadingCategories || isLoadingPaymentMethods;
+
+  // Loading global apenas na primeira vez que a página carrega
+  const isInitialLoading = !selectedBank && isAnyLoading;
 
   // Calcular saldo real de cada banco baseado nas transações
   const banksWithRealBalance = useMemo(() => {
@@ -577,7 +583,13 @@ const Transactions: React.FC = () => {
     return transaction.type === 'CREDIT' ? 'Crédito' : 'Débito';
   };
 
-
+  if (isInitialLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600"></div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -852,7 +864,7 @@ const Transactions: React.FC = () => {
 
       {/* Summary Cards */}
       {selectedBank && transactions.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8"> {/* gap-6 e mb-8 para mais separação */}
           <div className="bg-white p-4 rounded-lg shadow">
             <div className="flex items-center justify-between">
               <div>
@@ -1040,7 +1052,7 @@ const Transactions: React.FC = () => {
       {/* Transactions List */}
       {selectedBank ? (
         <div className="bg-white rounded-lg shadow overflow-hidden">
-          {isLoading ? (
+          {isLoadingTransactions ? (
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
             </div>
